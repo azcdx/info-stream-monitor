@@ -1,0 +1,137 @@
+// ===== Reddit 真实数据集成代码 =====
+// 请将以下代码添加到 background.js 中
+
+// 1. 在文件顶部（大约第 50 行附近）添加 Reddit 处理的 ID 集合：
+/*
+const redditProcessedIds = new Set();
+*/
+
+// 2. 替换 fetchRedditData 函数（大约第 338 行）：
+/*
+async function fetchRedditData(config) {
+  try {
+    console.log('[Reddit] 获取真实数据...');
+
+    const subreddits = config.reddit?.subreddits || ['r/ethereum', 'r/cryptocurrency', 'r/defi'];
+
+    for (const subreddit of subreddits) {
+      const url = 'https://www.reddit.com/' + subreddit + '/hot.json?limit=5';
+
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          console.log('[Reddit] ' + subreddit + ' 失败: ' + response.status);
+          continue;
+        }
+
+        const data = await response.json();
+        const posts = data.data?.children || [];
+
+        console.log('[Reddit] ' + subreddit + ' 获取到 ' + posts.length + ' 条');
+
+        for (const post of posts) {
+          const redditData = post.data;
+
+          const item = {
+            id: 'reddit_' + redditData.id,
+            title: redditData.title,
+            content: redditData.selftext || redditData.url || '',
+            type: classifyRedditPost(redditData),
+            score: calculateRedditScore(redditData),
+            time: redditData.created_utc * 1000,
+            source: 'reddit',
+            url: 'https://www.reddit.com' + redditData.permalink,
+            subreddit: subreddit,
+            author: redditData.author,
+            value: extractRedditValue(redditData)
+          };
+
+          // 检查是否已处理过
+          if (redditProcessedIds.has(item.id)) {
+            continue;
+          }
+
+          redditProcessedIds.add(item.id);
+
+          // 清理旧ID
+          if (redditProcessedIds.size > 500) {
+            const oldIds = Array.from(redditProcessedIds).slice(0, 250);
+            oldIds.forEach(id => redditProcessedIds.delete(id));
+          }
+
+          // 分析和处理
+          await analyzeAndProcess(item);
+        }
+
+      } catch (error) {
+        console.error('[Reddit] ' + subreddit + ' 错误: ' + error.message);
+      }
+    }
+
+  } catch (error) {
+    console.error('[Reddit] 获取失败:', error);
+  }
+}
+
+// 分类 Reddit 帖子
+function classifyRedditPost(post) {
+  const title = (post.title || '').toLowerCase();
+  const selftext = (post.selftext || '').toLowerCase();
+  const text = title + ' ' + selftext;
+
+  if (text.includes('airdrop') || text.includes('空投') || text.includes('free') || text.includes('giveaway')) {
+    return '🎯';
+  } else if (text.includes('tutorial') || text.includes('guide') || text.includes('how to') || text.includes('解释')) {
+    return '🧠';
+  } else if (text.includes('surge') || text.includes('pump') || text.includes('dump') || text.includes('breakout') || text.includes('突破')) {
+    return '📈';
+  }
+
+  return '💡';
+}
+
+// 计算 Reddit 评分
+function calculateRedditScore(post) {
+  let score = 5;
+
+  const upvoteRatio = post.upvote_ratio || 0.5;
+  score += Math.floor(upvoteRatio * 2);
+
+  if (post.score > 100) score += 2;
+  if (post.score > 500) score += 1;
+
+  if (post.num_comments > 50) score += 1;
+  if (post.num_comments > 200) score += 1;
+
+  const hoursOld = (Date.now() / 1000 - post.created_utc) / 3600;
+  if (hoursOld < 6) score += 1;
+  if (hoursOld < 24) score += 1;
+
+  return Math.min(10, score);
+}
+
+// 提取 Reddit 价值说明
+function extractRedditValue(post) {
+  const title = post.title || '';
+  const selftext = post.selftext || '';
+
+  if (selftext) {
+    return selftext.substring(0, 150) + '...';
+  }
+
+  return '来自 ' + (post.subreddit_name || post.subreddit) + ' 的帖子，' + post.num_comments + ' 条评论。';
+}
+
+// 替换 startRedditMonitoring 函数
+function startRedditMonitoring(config) {
+  console.log('[Reddit] 启动监控，subreddits:', config.reddit?.subreddits);
+
+  // 立即执行一次
+  fetchRedditData(config);
+
+  // 每5分钟执行一次
+  fetchIntervals.reddit = setInterval(() => {
+    fetchRedditData(config);
+  }, 300000);
+}
+*/

@@ -1,0 +1,19 @@
+{
+  "name": "info-stream-monitor",
+  "version": "1.0.0",
+  "description": "信息流监控助手 - Chrome 插件",
+  "main": "background.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "chrome-extension",
+    "info-monitor",
+    "ai-analysis",
+    "jin10",
+    "twitter",
+    "reddit"
+  ],
+  "author": "azcdx",
+  "license": "MIT"
+}

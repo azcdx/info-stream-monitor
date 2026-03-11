@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "信息流监控助手",
+  "version": "1.0.0",
+  "description": "监控金十数据、X/Twitter、Reddit，AI 分析价值并推送",
+  "permissions": [
+    "storage",
+    "notifications",
+    "activeTab",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "https://*.jin10.com/*",
+    "https://*.x.com/*",
+    "https://*.twitter.com/*",
+    "https://*.reddit.com/*",
+    "https://api.tavily.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {},
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  }
+}

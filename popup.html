@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>信息流监控助手</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 400px;
+      min-height: 600px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #333;
+    }
+
+    .container {
+      padding: 12px;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 12px;
+      color: #ffffff;
+      cursor: pointer;
+    }
+
+    .header h1 {
+      font-size: 16px;
+      margin-bottom: 4px;
+    }
+
+    .status {
+      font-size: 11px;
+      opacity: 0.9;
+    }
+
+    .status.running {
+      color: #4ade80;
+    }
+
+    .status.stopped {
+      color: #f87171;
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: 10px;
+      margin-bottom: 8px;
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 10px 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .card-header:hover {
+      background: rgba(0, 0, 0, 0.02);
+    }
+
+    .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #1f2937;
+    }
+
+    .card-toggle {
+      font-size: 12px;
+      color: #6b7280;
+    }
+
+    .card-body {
+      padding: 12px;
+      display: none;
+    }
+
+    .card-body.expanded {
+      display: block;
+    }
+
+    .source-item {
+      display: flex;
+      align-items: center;
+      padding: 6px 0;
+      border-bottom: 1px solid #f3f4f6;
+    }
+
+    .source-item:last-child {
+      border-bottom: none;
+    }
+
+    .source-checkbox {
+      width: 16px;
+      height: 16px;
+      margin-right: 8px;
+      cursor: pointer;
+    }
+
+    .source-label {
+      flex: 1;
+      font-size: 12px;
+      color: #374151;
+    }
+
+    .source-count {
+      font-size: 11px;
+      color: #9ca3af;
+    }
+
+    .stats {
+      display: flex;
+      justify-content: space-around;
+      padding: 8px 0;
+      text-align: center;
+    }
+
+    .stat-item {
+      flex: 1;
+    }
+
+    .stat-value {
+      font-size: 20px;
+      font-weight: 700;
+      color: #667eea;
+    }
+
+    .stat-label {
+      font-size: 10px;
+      color: #6b7280;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: #667eea;
+      color: #ffffff;
+    }
+
+    .btn-primary:hover {
+      background: #5a67d8;
+    }
+
+    .btn-danger {
+      background: #ef4444;
+      color: #ffffff;
+    }
+
+    .btn-danger:hover {
+      background: #dc2626;
+    }
+
+    /* 最近通知 - 更大的区域 */
+    .recent {
+      max-height: 350px;
+      overflow-y: auto;
+      padding: 8px;
+    }
+
+    .recent::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .recent::-webkit-scrollbar-track {
+      background: #f3f4f6;
+    }
+
+    .recent::-webkit-scrollbar-thumb {
+      background: #d1d5db;
+      border-radius: 2px;
+    }
+
+    .recent-item {
+      padding: 10px;
+      border-radius: 6px;
+      margin-bottom: 8px;
+      background: #f9fafb;
+      border-left: 3px solid #667eea;
+      transition: background 0.2s;
+    }
+
+    .recent-item:hover {
+      background: #f3f4f6;
+    }
+
+    .recent-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .recent-type {
+      font-size: 14px;
+    }
+
+    .recent-source {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 8px;
+      background: rgba(102, 126, 234, 0.1);
+      color: #667eea;
+    }
+
+    .recent-time {
+      font-size: 10px;
+      color: #9ca3af;
+    }
+
+    .recent-title {
+      font-size: 13px;
+      font-weight: 500;
+      color: #1f2937;
+      margin-bottom: 6px;
+      line-height: 1.4;
+    }
+
+    .recent-value {
+      font-size: 11px;
+      color: #6b7280;
+      margin-bottom: 8px;
+      line-height: 1.5;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .recent-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 6px;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .recent-score {
+      font-size: 10px;
+      color: #f59e0b;
+    }
+
+    .recent-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    .recent-btn {
+      padding: 4px 10px;
+      border: none;
+      border-radius: 4px;
+      font-size: 10px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .recent-btn-link {
+      background: #dbeafe;
+      color: #2563eb;
+    }
+
+    .recent-btn-link:hover {
+      background: #bfdbfe;
+    }
+
+    .recent-btn-fav {
+      background: #fef3c7;
+      color: #d97706;
+    }
+
+    .recent-btn-fav:hover {
+      background: #fde68a;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px 16px;
+      color: #9ca3af;
+      font-size: 12px;
+    }
+
+    .footer {
+      margin-top: 8px;
+      display: flex;
+      gap: 6px;
+    }
+
+    .footer-btn {
+      flex: 1;
+      background: rgba(255, 255, 255, 0.2);
+      border: none;
+      color: #ffffff;
+      padding: 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .footer-btn:hover {
+      background: rgba(255, 255, 255, 0.3);
+    }
+
+    .fold-indicator {
+      display: inline-block;
+      transition: transform 0.2s;
+    }
+
+    .fold-indicator.expanded {
+      transform: rotate(180deg);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>📊 信息流监控助手</h1>
+      <div class="status" id="status">初始化中...</div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" id="sources-toggle">
+        <span class="card-title">监控源</span>
+        <span class="card-toggle"><span class="fold-indicator">▼</span></span>
+      </div>
+      <div class="card-body expanded" id="sources-body">
+        <div class="source-item">
+          <input type="checkbox" class="source-checkbox" id="jin10" checked>
+          <label class="source-label" for="jin10">金十数据</label>
+          <span class="source-count" id="jin10-count">0</span>
+        </div>
+        <div class="source-item">
+          <input type="checkbox" class="source-checkbox" id="twitter">
+          <label class="source-label" for="twitter">X/Twitter</label>
+          <span class="source-count" id="twitter-count">0</span>
+        </div>
+        <div class="source-item">
+          <input type="checkbox" class="source-checkbox" id="reddit">
+          <label class="source-label" for="reddit">Reddit</label>
+          <span class="source-count" id="reddit-count">0</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" id="stats-toggle">
+        <span class="card-title">统计</span>
+        <span class="card-toggle"><span class="fold-indicator">▼</span></span>
+      </div>
+      <div class="card-body expanded" id="stats-body">
+        <div class="stats">
+          <div class="stat-item">
+            <div class="stat-value" id="total-count">0</div>
+            <div class="stat-label">已捕获</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="valuable-count">0</div>
+            <div class="stat-label">有价值</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="favorite-count">0</div>
+            <div class="stat-label">已收藏</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 最近通知 - 更大的区域 -->
+    <div class="card">
+      <div class="card-header" id="recent-toggle">
+        <span class="card-title">最近通知</span>
+        <span class="card-toggle"><span class="fold-indicator expanded">▼</span></span>
+      </div>
+      <div class="card-body expanded" id="recent-body">
+        <div class="recent" id="recent-list">
+          <div class="empty-state">
+            <div style="font-size: 32px; margin-bottom: 8px;">📭</div>
+            <div>暂无通知</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="buttons">
+      <button class="btn btn-primary" id="start-btn">开始监控</button>
+      <button class="btn btn-danger" id="stop-btn" style="display: none;">停止监控</button>
+    </div>
+
+    <div class="footer">
+      <button class="footer-btn" id="config-btn">⚙️ 配置</button>
+      <button class="footer-btn" id="favorites-btn">📁 收藏</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

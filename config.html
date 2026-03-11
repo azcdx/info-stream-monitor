@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>配置数据源 - 信息流监控助手</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 24px;
+      border-radius: 12px;
+      margin-bottom: 24px;
+    }
+
+    .header h1 {
+      font-size: 24px;
+      margin-bottom: 8px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .card-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: #1f2937;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 14px;
+      font-weight: 500;
+      color: #374151;
+      margin-bottom: 8px;
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    .form-input:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    textarea.form-input {
+      min-height: 100px;
+      font-family: monospace;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: #667eea;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #5a67d8;
+    }
+
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    .btn-secondary:hover {
+      background: #e5e7eb;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .tag {
+      background: #f3f4f6;
+      padding: 4px 12px;
+      border-radius: 16px;
+      font-size: 12px;
+      color: #374151;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: #6b7280;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>⚙️ 配置数据源</h1>
+      <p>自定义监控的数据源和关键词</p>
+    </div>
+
+    <!-- Twitter 配置 -->
+    <div class="card">
+      <div class="card-title">X/Twitter 配置</div>
+
+      <div class="form-group">
+        <label class="form-label">关注博主</label>
+        <textarea class="form-input" id="twitter-users" placeholder="每行一个用户名，例如：&#10;@VitalikButerin&#10;@balajis"></textarea>
+        <div class="hint">每行一个 @用户名</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">关键词</label>
+        <textarea class="form-input" id="twitter-keywords" placeholder="每行一个关键词，例如：&#10;#airdrop&#10;#RWA&#10;#DeFi"></textarea>
+        <div class="hint">每行一个关键词或话题</div>
+      </div>
+    </div>
+
+    <!-- Reddit 配置 -->
+    <div class="card">
+      <div class="card-title">Reddit 配置</div>
+
+      <div class="form-group">
+        <label class="form-label">订阅 Subreddit</label>
+        <textarea class="form-input" id="reddit-subreddits" placeholder="每行一个，例如：&#10;r/ethereum&#10;r/cryptocurrency&#10;r/defi"></textarea>
+        <div class="hint">每行一个 subreddit 名称</div>
+      </div>
+    </div>
+
+    <!-- JSON 导入导出 -->
+    <div class="card">
+      <div class="card-title">JSON 导入/导出</div>
+
+      <div class="form-group">
+        <label class="form-label">导入配置 (JSON)</label>
+        <textarea class="form-input" id="import-json" placeholder='粘贴 JSON 配置，例如：&#10;{&#10;  "twitter": {&#10;    "users": ["@VitalikButerin"],&#10;    "keywords": ["#airdrop"]&#10;  },&#10;  "reddit": {&#10;    "subreddits": ["r/ethereum"]&#10;  }&#10;}'></textarea>
+      </div>
+
+      <div class="buttons">
+        <button class="btn btn-primary" id="import-btn">导入配置</button>
+        <button class="btn btn-secondary" id="export-btn">导出配置</button>
+      </div>
+    </div>
+
+    <!-- 保存按钮 -->
+    <div class="buttons">
+      <button class="btn btn-primary" id="save-btn">保存配置</button>
+      <button class="btn btn-secondary" id="cancel-btn">返回</button>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+</body>
+</html>
