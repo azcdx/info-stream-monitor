@@ -650,7 +650,7 @@ function startRedditMonitoring(config) {
   fetchIntervals.reddit = setInterval(() => {
     console.log('[Reddit] 定时触发 -', new Date().toLocaleTimeString());
     fetchRedditData(config);
-  }, 120000);
+  }, 60000);
 
   console.log('[Reddit] 监控已启动，每2分钟检查一次新内容');
 }
