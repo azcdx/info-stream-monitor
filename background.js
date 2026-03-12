@@ -797,6 +797,12 @@ function extractRedditValue(post, translatedContent) {
 
 // ============ AI 分析和处理 ============
 async function analyzeAndProcess(item) {
+    // 检查是否仍在运行
+    if (!isRunning) {
+      console.log('[处理] 监控已停止，跳过处理');
+      return;
+    }
+
   try {
     console.log('[处理] 项目:', item.title, '评分:', item.score, '来源:', item.source);
 
