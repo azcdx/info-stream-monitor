@@ -398,7 +398,9 @@ async function fetchJin10Data(config) {
       const itemTime = item.time || item.created_at || Date.now();
 
       // 跳过监控开始时间之前的旧数据
-      if (lastMonitorTime > 0 && itemTime < lastMonitorTime) {
+      const fiveMinutesAgo = lastMonitorTime - 300000;
+
+      if (lastMonitorTime > 0 && itemTime < fiveMinutesAgo) {
         console.log('[金十] 跳过旧数据:', (item.title || item.content || '').substring(0, 30));
         continue;
       }
@@ -713,7 +715,9 @@ async function fetchRedditData(config) {
           };
 
           // 跳过监控开始时间之前的旧数据
-          if (lastMonitorTime > 0 && item.time < lastMonitorTime) {
+          const fiveMinutesAgo = lastMonitorTime - 300000;
+
+          if (lastMonitorTime > 0 && item.time < fiveMinutesAgo) {
             console.log('[Reddit] 跳过旧数据:', item.title.substring(0, 30));
             continue;
           }
