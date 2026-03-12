@@ -714,14 +714,6 @@ async function fetchRedditData(config) {
             value: extractRedditValue(redditData, translatedContent)
           };
 
-          // 跳过监控开始时间之前的旧数据
-          const fiveMinutesAgo = lastMonitorTime - 300000;
-
-          if (lastMonitorTime > 0 && item.time < fiveMinutesAgo) {
-            console.log('[Reddit] 跳过旧数据:', item.title.substring(0, 30));
-            continue;
-          }
-
           console.log('[Reddit] 数据:', {
             title: item.title.substring(0, 30),
             author: item.author,
