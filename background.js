@@ -3,11 +3,13 @@
 // ============ 状态管理 ============
 let isRunning = false;
 let fetchIntervals = {};
+let lastMonitorTime = 0; // 上次监控开始时间
 
 // 已处理ID的存储键
 const STORAGE_KEYS = {
   PROCESSED_IDS: 'processedIds_v3',
-  REDDIT_PROCESSED_IDS: 'redditProcessedIds_v3'
+  REDDIT_PROCESSED_IDS: 'redditProcessedIds_v3',
+  LAST_MONITOR_TIME: 'lastMonitorTime'
 };
 
 // 加载已处理的ID（带时间戳）
@@ -278,6 +280,11 @@ async function startMonitoring(sources) {
       throw new Error('请至少选择一个监控源');
     }
 
+    // 记录监控开始时间（避免抓取旧数据）
+    lastMonitorTime = Date.now();
+    await chrome.storage.local.set({ [STORAGE_KEYS.LAST_MONITOR_TIME]: lastMonitorTime });
+    console.log('[监控] 记录开始时间:', new Date(lastMonitorTime).toLocaleString());
+
     // 清除已有的定时器
     clearAllFetchIntervals();
 
@@ -315,6 +322,11 @@ async function stopMonitoring() {
 
   // 清除所有定时器
   clearAllFetchIntervals();
+
+  // 重置监控开始时间
+  lastMonitorTime = 0;
+  await chrome.storage.local.remove(STORAGE_KEYS.LAST_MONITOR_TIME);
+  console.log('[监控] 已重置开始时间');
 
   // 更新状态
   isRunning = false;
@@ -383,6 +395,13 @@ async function fetchJin10Data(config) {
     // 处理最新数据（取前10条）
     for (const item of items.slice(0, 10)) {
       const id = 'jin10_' + (item.id || item._id || Date.now() + Math.random());
+      const itemTime = item.time || item.created_at || Date.now();
+
+      // 跳过监控开始时间之前的旧数据
+      if (lastMonitorTime > 0 && itemTime < lastMonitorTime) {
+        console.log('[金十] 跳过旧数据:', (item.title || item.content || '').substring(0, 30));
+        continue;
+      }
 
       // 检查是否已处理过
       const isNew = await addProcessedId(STORAGE_KEYS.PROCESSED_IDS, id);
@@ -397,7 +416,7 @@ async function fetchJin10Data(config) {
         content: item.content || item.data?.content || '',
         type: classifyJin10Post(item),
         score: calculateJin10Score(item),
-        time: item.time || item.created_at || Date.now(),
+        time: itemTime,
         source: 'jin10',
         url: item.url || item.link || `https://www.jin10.com/detail/${item.id}`,
         value: item.content || item.data?.content || ''
@@ -692,6 +711,12 @@ async function fetchRedditData(config) {
             num_comments: redditData.num_comments || 0,
             value: extractRedditValue(redditData, translatedContent)
           };
+
+          // 跳过监控开始时间之前的旧数据
+          if (lastMonitorTime > 0 && item.time < lastMonitorTime) {
+            console.log('[Reddit] 跳过旧数据:', item.title.substring(0, 30));
+            continue;
+          }
 
           console.log('[Reddit] 数据:', {
             title: item.title.substring(0, 30),
