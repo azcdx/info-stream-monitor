@@ -7,67 +7,100 @@ let fetchIntervals = {};
 
 // 已处理ID的存储键
 const STORAGE_KEYS = {
-  PROCESSED_IDS: 'processedIds_v2',
-  REDDIT_PROCESSED_IDS: 'redditProcessedIds_v2',
+  PROCESSED_IDS: 'processedIds_v3',
+  REDDIT_PROCESSED_IDS: 'redditProcessedIds_v3',
   LAST_FETCH_TIME: 'lastFetchTime'
 };
 
-// 加载已处理的ID
+// 加载已处理的ID（带时间戳）
 async function loadProcessedIds(key) {
   try {
     const result = await chrome.storage.local.get([key]);
-    const ids = result[key] || [];
-    return new Set(ids);
+    const data = result[key] || {};
+    return new Map(Object.entries(data));
   } catch (error) {
     console.error('[加载ID] 失败:', error);
-    return new Set();
+    return new Map();
   }
 }
 
-// 保存已处理的ID
-async function saveProcessedIds(key, idSet) {
+// 保存已 processedId（带时间戳）
+async function saveProcessedIds(key, idMap) {
   try {
-    // 只保留最近1000个ID，避免存储过大
-    const ids = Array.from(idSet).slice(-1000);
-    await chrome.storage.local.set({ [key]: ids });
+    const data = Object.fromEntries(idMap.entries());
+    await chrome.storage.local.set({ [key]: data });
   } catch (error) {
     console.error('[保存ID] 失败:', error);
   }
 }
 
-// 检查并添加已处理的ID
-async function addProcessedId(key, id, maxSize = 1000) {
-  let idSet;
+// 检查并添加已处理的ID（带时间戳）
+async function addProcessedId(key, id, timestamp = Date.now()) {
+  let idMap;
   if (key === STORAGE_KEYS.REDDIT_PROCESSED_IDS) {
-    idSet = redditProcessedIds;
+    idMap = redditProcessedIds;
   } else {
-    idSet = processedIds;
+    idMap = processedIds;
   }
 
-  idSet.add(id);
+  // 添加ID和时间戳
+  idMap.set(id, timestamp);
 
-  // 清理旧ID
-  if (idSet.size > maxSize) {
-    const ids = Array.from(idSet);
-    const toRemove = ids.slice(0, Math.floor(maxSize / 2));
-    toRemove.forEach(id => idSet.delete(id));
+  // 清理24小时前的旧数据
+  const oneDayAgo = timestamp - 24 * 60 * 60 * 1000;
+  for (const [savedId, time] of idMap.entries()) {
+    if (time < oneDayAgo) {
+      idMap.delete(savedId);
+    }
+  }
+
+  // 限制最大数量
+  if (idMap.size > 1000) {
+    const sortedIds = Array.from(idMap.entries()).sort((a, b) => b[1] - a[1]);
+    const toRemove = sortedIds.slice(500);
+    toRemove.forEach(([savedId, time]) => idMap.delete(savedId));
   }
 
   // 异步保存到存储（不阻塞）
-  saveProcessedIds(key, idSet);
+  saveProcessedIds(key, idMap);
 
-  return idSet.has(id);
+  return idMap.has(id);
 }
 
-// 初始化时加载已处理的ID
-let processedIds = new Set();
-let redditProcessedIds = new Set();
+// 初始化时加载已处理的ID（带时间戳）
+let processedIds = new Map();
+let redditProcessedIds = new Map();
 
 async function initializeProcessedIds() {
   console.log('[初始化] 加载已处理的ID...');
   processedIds = await loadProcessedIds(STORAGE_KEYS.PROCESSED_IDS);
   redditProcessedIds = await loadProcessedIds(STORAGE_KEYS.REDDIT_PROCESSED_IDS);
-  console.log('[初始化] 已加载', processedIds.size, '个金十ID,', redditProcessedIds.size, '个Reddit ID');
+  
+  // 启动时清理24小时前的数据
+  const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+  
+  let jin10Cleaned = 0;
+  for (const [id, time] of processedIds.entries()) {
+    if (time < oneDayAgo) {
+      processedIds.delete(id);
+      jin10Cleaned++;
+    }
+  }
+  
+  let redditCleaned = 0;
+  for (const [id, time] of redditProcessedIds.entries()) {
+    if (time < oneDayAgo) {
+      redditProcessedIds.delete(id);
+      redditCleaned++;
+    }
+  }
+  
+  // 保存清理后的数据
+  await saveProcessedIds(STORAGE_KEYS.PROCESSED_IDS, processedIds);
+  await saveProcessedIds(STORAGE_KEYS.REDDIT_PROCESSED_IDS, redditProcessedIds);
+  
+  console.log('[初始化] 已加载', processedIds.size, '个金十ID（清理了', jin10Cleaned, '个旧数据）');
+  console.log('[初始化] 已加载', redditProcessedIds.size, '个Reddit ID（清理了', redditCleaned, '个旧数据）');
 }
 
 // 默认配置

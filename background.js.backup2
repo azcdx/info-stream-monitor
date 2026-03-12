@@ -1,9 +1,74 @@
-// 信息流监控助手 - 后台服务
+// 信息流监控助手 - 后台服务（持久化版本）
 
 // ============ 状态管理 ============
 let isRunning = false;
 let monitoringInterval = null;
 let fetchIntervals = {};
+
+// 已处理ID的存储键
+const STORAGE_KEYS = {
+  PROCESSED_IDS: 'processedIds_v2',
+  REDDIT_PROCESSED_IDS: 'redditProcessedIds_v2',
+  LAST_FETCH_TIME: 'lastFetchTime'
+};
+
+// 加载已处理的ID
+async function loadProcessedIds(key) {
+  try {
+    const result = await chrome.storage.local.get([key]);
+    const ids = result[key] || [];
+    return new Set(ids);
+  } catch (error) {
+    console.error('[加载ID] 失败:', error);
+    return new Set();
+  }
+}
+
+// 保存已处理的ID
+async function saveProcessedIds(key, idSet) {
+  try {
+    // 只保留最近1000个ID，避免存储过大
+    const ids = Array.from(idSet).slice(-1000);
+    await chrome.storage.local.set({ [key]: ids });
+  } catch (error) {
+    console.error('[保存ID] 失败:', error);
+  }
+}
+
+// 检查并添加已处理的ID
+async function addProcessedId(key, id, maxSize = 1000) {
+  let idSet;
+  if (key === STORAGE_KEYS.REDDIT_PROCESSED_IDS) {
+    idSet = redditProcessedIds;
+  } else {
+    idSet = processedIds;
+  }
+
+  idSet.add(id);
+
+  // 清理旧ID
+  if (idSet.size > maxSize) {
+    const ids = Array.from(idSet);
+    const toRemove = ids.slice(0, Math.floor(maxSize / 2));
+    toRemove.forEach(id => idSet.delete(id));
+  }
+
+  // 异步保存到存储（不阻塞）
+  saveProcessedIds(key, idSet);
+
+  return idSet.has(id);
+}
+
+// 初始化时加载已处理的ID
+let processedIds = new Set();
+let redditProcessedIds = new Set();
+
+async function initializeProcessedIds() {
+  console.log('[初始化] 加载已处理的ID...');
+  processedIds = await loadProcessedIds(STORAGE_KEYS.PROCESSED_IDS);
+  redditProcessedIds = await loadProcessedIds(STORAGE_KEYS.REDDIT_PROCESSED_IDS);
+  console.log('[初始化] 已加载', processedIds.size, '个金十ID,', redditProcessedIds.size, '个Reddit ID');
+}
 
 // 默认配置
 const defaultConfig = {
@@ -20,7 +85,7 @@ const defaultConfig = {
     keywords: []
   },
   reddit: {
-    subreddits: []
+    subreddits: ['r/ethereum', 'r/cryptocurrency', 'r/defi']
   },
   thresholds: {
     notificationScore: 7,
@@ -30,7 +95,8 @@ const defaultConfig = {
     enabled: false,
     start: '23:00',
     end: '08:00'
-  }
+  },
+  translate: true  // 是否翻译内容
 };
 
 // 模拟数据集（用于测试）
@@ -75,9 +141,17 @@ const mockDataItems = [
 
 let mockDataIndex = 0;
 
+// 点击扩展图标时打开侧边栏
+chrome.action.onClicked.addListener(async (tab) => {
+  await chrome.sidePanel.open({ windowId: tab.windowId });
+});
+
 // 初始化
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(async () => {
   console.log('信息流监控助手已安装');
+
+  // 先加载已处理的ID
+  await initializeProcessedIds();
 
   // 初始化存储
   chrome.storage.local.get([
@@ -158,6 +232,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         .catch(error => sendResponse({ success: false, error: error.message }));
       return true;
 
+    case 'clearProcessedIds':
+      clearProcessedIds()
+        .then(() => sendResponse({ success: true }))
+        .catch(error => sendResponse({ success: false, error: error.message }));
+      return true;
+
     default:
       sendResponse({ success: false, error: '未知操作' });
   }
@@ -179,6 +259,7 @@ async function startMonitoring(sources) {
     // 获取当前配置
     const result = await chrome.storage.local.get(['config']);
     const config = result.config || defaultConfig;
+    console.log('当前配置:', JSON.stringify(config));
 
     // 更新源配置
     if (sources) {
@@ -195,14 +276,17 @@ async function startMonitoring(sources) {
 
     // 启动各个源的监控
     if (config.sources.jin10) {
+      console.log('启动金十监控');
       startJin10Monitoring(config);
     }
 
     if (config.sources.twitter) {
+      console.log('启动 Twitter 监控');
       startTwitterMonitoring(config);
     }
 
     if (config.sources.reddit) {
+      console.log('启动 Reddit 监控');
       startRedditMonitoring(config);
     }
 
@@ -249,6 +333,8 @@ async function updateConfig(sources) {
   config.sources = { ...config.sources, ...sources };
   await chrome.storage.local.set({ config });
 
+  console.log('配置已更新:', config.sources);
+
   // 如果正在运行，重启监控
   if (isRunning) {
     await stopMonitoring();
@@ -270,9 +356,6 @@ function startJin10Monitoring(config) {
     fetchJin10Data(config);
   }, 30000);
 }
-
-// 已处理的ID集合（去重）
-const processedIds = new Set();
 
 async function fetchJin10Data(config) {
   try {
@@ -297,19 +380,14 @@ async function fetchJin10Data(config) {
     // 循环使用不同的模拟数据
     mockDataIndex = (mockDataIndex + 1) % mockDataItems.length;
 
-    // 检查是否已处理过
-    if (processedIds.has(mockId)) {
-      console.log('已处理过，跳过');
+    // 检查是否已处理过（使用持久化的ID检查）
+    const isNew = await addProcessedId(STORAGE_KEYS.PROCESSED_IDS, mockId);
+    if (!isNew) {
+      console.log('已处理过，跳过:', mockId);
       return;
     }
 
-    processedIds.add(mockId);
-
-    // 清理旧ID
-    if (processedIds.size > 1000) {
-      const oldIds = Array.from(processedIds).slice(0, 500);
-      oldIds.forEach(id => processedIds.delete(id));
-    }
+    console.log('新数据:', mockData.title);
 
     // 分析数据
     await analyzeAndProcess(mockData);
@@ -329,19 +407,180 @@ async function fetchTwitterData(config) {
   // TODO: 实现
 }
 
+// ============ 翻译工具 ============
+async function translateText(text, from = 'en', to = 'zh') {
+  if (!text) return '';
+
+  // 如果已经是中文，直接返回
+  const chineseRegex = /[\u4e00-\u9fa5]/;
+  if (chineseRegex.test(text) && text.match(/[\u4e00-\u9fa5]/g).length > text.length / 4) {
+    return text;
+  }
+
+  try {
+    // 使用免费的 MyMemory 翻译 API
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${from}|${to}`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data.responseStatus === 200 && data.responseData?.translatedText) {
+      return data.responseData.translatedText;
+    }
+    return text;
+  } catch (error) {
+    console.error('[翻译] 失败:', error.message);
+    return text;
+  }
+}
+
 // ============ Reddit 监控 ============
 function startRedditMonitoring(config) {
-  console.log('启动 Reddit 监控');
-  // TODO: 实现 Reddit 数据抓取
+  const subreddits = (config.reddit?.subreddits?.length > 0)
+    ? config.reddit.subreddits
+    : ['r/ethereum', 'r/cryptocurrency', 'r/defi'];
+  console.log('[Reddit] 启动监控，subreddits:', subreddits);
+
+  // 立即执行一次
+  fetchRedditData(config);
+
+  // 每5分钟执行一次
+  fetchIntervals.reddit = setInterval(() => {
+    fetchRedditData(config);
+  }, 300000);
 }
 
 async function fetchRedditData(config) {
-  // TODO: 实现
+  try {
+    console.log('[Reddit] 获取真实数据...');
+
+    const subreddits = (config.reddit?.subreddits?.length > 0)
+      ? config.reddit.subreddits
+      : ['r/ethereum', 'r/cryptocurrency', 'r/defi'];
+    console.log('[Reddit] 监控的 subreddits:', subreddits);
+
+    const shouldTranslate = config.translate !== false;
+
+    for (const subreddit of subreddits) {
+      const url = 'https://www.reddit.com/' + subreddit + '/hot.json?limit=5';
+      console.log('[Reddit] 正在获取:', url);
+
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          console.log('[Reddit] ' + subreddit + ' 失败: ' + response.status);
+          continue;
+        }
+
+        const data = await response.json();
+        const posts = data.data?.children || [];
+
+        console.log('[Reddit] ' + subreddit + ' 获取到 ' + posts.length + ' 条帖子');
+
+        for (const post of posts) {
+          const redditData = post.data;
+
+          // 翻译标题和内容
+          let translatedTitle = redditData.title;
+          let translatedContent = redditData.selftext || redditData.url || '';
+
+          if (shouldTranslate) {
+            console.log('[Reddit] 正在翻译...');
+            translatedTitle = await translateText(redditData.title);
+            if (redditData.selftext) {
+              translatedContent = await translateText(redditData.selftext);
+            }
+            console.log('[Reddit] 翻译完成');
+          }
+
+          const item = {
+            id: 'reddit_' + redditData.id,
+            title: translatedTitle,
+            content: translatedContent,
+            type: classifyRedditPost(redditData),
+            score: calculateRedditScore(redditData),
+            time: redditData.created_utc * 1000,
+            source: 'reddit',
+            url: 'https://www.reddit.com' + redditData.permalink,
+            subreddit: subreddit,
+            author: redditData.author,
+            value: extractRedditValue(redditData, translatedContent)
+          };
+
+          console.log('[Reddit] 帖子:', item.title, '评分:', item.score, '类型:', item.type);
+
+          // 检查是否已处理过（使用持久化的ID检查）
+          const isNew = await addProcessedId(STORAGE_KEYS.REDDIT_PROCESSED_IDS, item.id);
+          if (!isNew) {
+            console.log('[Reddit] 已处理过，跳过:', item.id);
+            continue;
+          }
+
+          console.log('[Reddit] 新帖子:', item.title);
+
+          // 分析和处理
+          await analyzeAndProcess(item);
+        }
+
+      } catch (error) {
+        console.error('[Reddit] ' + subreddit + ' 错误: ' + error.message);
+      }
+    }
+
+  } catch (error) {
+    console.error('[Reddit] 获取失败:', error);
+  }
+}
+
+// 分类 Reddit 帖子
+function classifyRedditPost(post) {
+  const title = (post.title || '').toLowerCase();
+  const selftext = (post.selftext || '').toLowerCase();
+  const text = title + ' ' + selftext;
+
+  if (text.includes('airdrop') || text.includes('空投') || text.includes('free') || text.includes('giveaway')) {
+    return '🎯';
+  } else if (text.includes('tutorial') || text.includes('guide') || text.includes('how to') || text.includes('解释')) {
+    return '🧠';
+  } else if (text.includes('surge') || text.includes('pump') || text.includes('dump') || text.includes('breakout') || text.includes('突破')) {
+    return '📈';
+  }
+
+  return '💡';
+}
+
+// 计算 Reddit 评分
+function calculateRedditScore(post) {
+  let score = 5;
+
+  const upvoteRatio = post.upvote_ratio || 0.5;
+  score += Math.floor(upvoteRatio * 2);
+
+  if (post.score > 100) score += 2;
+  if (post.score > 500) score += 1;
+
+  if (post.num_comments > 50) score += 1;
+  if (post.num_comments > 200) score += 1;
+
+  const hoursOld = (Date.now() / 1000 - post.created_utc) / 3600;
+  if (hoursOld < 6) score += 1;
+  if (hoursOld < 24) score += 1;
+
+  return Math.min(10, score);
+}
+
+// 提取 Reddit 价值说明
+function extractRedditValue(post, translatedContent) {
+  if (translatedContent) {
+    return translatedContent.substring(0, 150) + '...';
+  }
+  return '来自 ' + (post.subreddit_name || post.subreddit) + ' 的帖子，' + post.num_comments + ' 条评论。';
 }
 
 // ============ AI 分析和处理 ============
 async function analyzeAndProcess(item) {
   try {
+    console.log('[处理] 项目:', item.title, '评分:', item.score, '来源:', item.source);
+
     // 获取配置
     const result = await chrome.storage.local.get(['config']);
     const config = result.config || defaultConfig;
@@ -355,10 +594,12 @@ async function analyzeAndProcess(item) {
 
     // 判断是否需要处理
     if (processedItem.score >= config.thresholds.panelScore) {
+      console.log('[处理] 评分达到面板阈值，添加到列表');
       // 更新统计
       await updateStats('total');
 
       if (processedItem.score >= config.thresholds.notificationScore) {
+        console.log('[处理] 评分达到通知阈值，发送通知');
         // 发送通知
         await sendNotification(processedItem);
         await updateStats('valuable');
@@ -366,6 +607,9 @@ async function analyzeAndProcess(item) {
 
       // 添加到最近通知
       await addRecentNotification(processedItem);
+      console.log('[处理] 已添加到最近通知');
+    } else {
+      console.log('[处理] 评分未达到面板阈值，跳过');
     }
 
   } catch (error) {
@@ -426,6 +670,7 @@ async function updateStats(type) {
   }
 
   await chrome.storage.local.set({ stats });
+  console.log('[统计] 更新:', stats);
 }
 
 // ============ 收藏管理 ============
@@ -508,12 +753,30 @@ async function exportConfig() {
   };
 }
 
+// ============ 清理已处理的ID ============
+async function clearProcessedIds() {
+  console.log('[清理] 清空所有已处理的ID');
+
+  // 清空内存
+  processedIds.clear();
+  redditProcessedIds.clear();
+
+  // 清空存储
+  await chrome.storage.local.remove([
+    STORAGE_KEYS.PROCESSED_IDS,
+    STORAGE_KEYS.REDDIT_PROCESSED_IDS
+  ]);
+
+  console.log('[清理] 已清空，重新开始');
+  return true;
+}
+
 // ============ 工具函数 ============
 function getSourceLabel(source) {
   const labels = {
     jin10: '金十',
-    twitter: 'X',
-    reddit: 'Reddit'
+    twitter: '推特',
+    reddit: '红迪'
   };
   return labels[source] || source;
 }
@@ -532,4 +795,4 @@ async function isQuietHours() {
   return currentTime >= config.quietHours.start || currentTime <= config.quietHours.end;
 }
 
-console.log('信息流监控助手后台服务已加载');
+console.log('信息流监控助手后台服务已加载（持久化版本）');
