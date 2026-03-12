@@ -50,6 +50,16 @@
       color: #1f2937;
     }
 
+    .form-row {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .form-col {
+      flex: 1;
+    }
+
     .form-group {
       margin-bottom: 16px;
     }
@@ -62,7 +72,7 @@
       margin-bottom: 8px;
     }
 
-    .form-input {
+    .form-input, .form-select {
       width: 100%;
       padding: 10px 12px;
       border: 1px solid #d1d5db;
@@ -70,7 +80,7 @@
       font-size: 14px;
     }
 
-    .form-input:focus {
+    .form-input:focus, .form-select:focus {
       outline: none;
       border-color: #667eea;
       box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
@@ -135,6 +145,10 @@
       color: #6b7280;
       margin-top: 4px;
     }
+
+    .hidden {
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -142,6 +156,27 @@
     <div class="header">
       <h1>⚙️ 配置数据源</h1>
       <p>自定义监控的数据源和关键词</p>
+    </div>
+
+    <!-- 翻译配置 -->
+    <div class="card">
+      <div class="card-title">翻译服务</div>
+
+      <div class="form-row">
+        <div class="form-col">
+          <label class="form-label">翻译服务</label>
+          <select class="form-select" id="translate-provider">
+            <option value="free">免费 API</option>
+            <option value="glm">GLM API</option>
+            <option value="deepseek">DeepSeek API</option>
+          </select>
+        </div>
+        <div class="form-col">
+          <label class="form-label">API Key</label>
+          <input type="password" class="form-input" id="translate-api-key" placeholder="非免费服务需要">
+        </div>
+      </div>
+      <div class="hint">GLM/DeepSeek 需要填写 API Key</div>
     </div>
 
     <!-- Twitter 配置 -->
@@ -167,8 +202,8 @@
 
       <div class="form-group">
         <label class="form-label">订阅 Subreddit</label>
-        <textarea class="form-input" id="reddit-subreddits" placeholder="每行一个，例如：&#10;r/ethereum&#10;r/cryptocurrency&#10;r/defi"></textarea>
-        <div class="hint">每行一个 subreddit 名称</div>
+        <textarea class="form-input" id="reddit-subreddits" placeholder="每行一个，例如：&#10;r/ethereum 以太坊&#10;r/cryptocurrency 加密货币&#10;r/geopolitics 地缘政治"></textarea>
+        <div class="hint">格式：r/xxx 备注（用空格分隔）</div>
       </div>
     </div>
 
@@ -184,7 +219,6 @@
       <div class="buttons">
         <button class="btn btn-primary" id="import-btn">导入配置</button>
         <button class="btn btn-secondary" id="export-btn">导出配置</button>
-      </div>
     </div>
 
     <!-- 保存按钮 -->

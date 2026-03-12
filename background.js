@@ -2,14 +2,12 @@
 
 // ============ 状态管理 ============
 let isRunning = false;
-let monitoringInterval = null;
 let fetchIntervals = {};
 
 // 已处理ID的存储键
 const STORAGE_KEYS = {
   PROCESSED_IDS: 'processedIds_v3',
-  REDDIT_PROCESSED_IDS: 'redditProcessedIds_v3',
-  LAST_FETCH_TIME: 'lastFetchTime'
+  REDDIT_PROCESSED_IDS: 'redditProcessedIds_v3'
 };
 
 // 加载已处理的ID（带时间戳）
@@ -43,6 +41,11 @@ async function addProcessedId(key, id, timestamp = Date.now()) {
     idMap = processedIds;
   }
 
+  // 先检查是否已存在
+  if (idMap.has(id)) {
+    return false; // 已处理过
+  }
+
   // 添加ID和时间戳
   idMap.set(id, timestamp);
 
@@ -64,7 +67,7 @@ async function addProcessedId(key, id, timestamp = Date.now()) {
   // 异步保存到存储（不阻塞）
   saveProcessedIds(key, idMap);
 
-  return idMap.has(id);
+  return true; // 新添加的
 }
 
 // 初始化时加载已处理的ID（带时间戳）
@@ -108,7 +111,7 @@ const defaultConfig = {
   sources: {
     jin10: true,
     twitter: false,
-    reddit: false
+    reddit: true  // 默认开启 Reddit 监控
   },
   jin10: {
     categories: ['加密货币', '宏观', '科技']
@@ -129,50 +132,12 @@ const defaultConfig = {
     start: '23:00',
     end: '08:00'
   },
-  translate: true  // 是否翻译内容
-};
-
-// 模拟数据集（用于测试）
-const mockDataItems = [
-  {
-    title: '美联储暗示6月可能降息',
-    content: '美联储最新会议纪要显示，6月降息可能性增加，市场预期发生转变...',
-    type: '📈',
-    score: 8
-  },
-  {
-    title: '以太坊Layer2交易量突破新高',
-    content: 'Arbitrum和Optimism网络日活动地址数创新高，显示L2采用率持续上升...',
-    type: '🎯',
-    score: 7
-  },
-  {
-    title: '比特币矿工算力连续三个月增长',
-    content: 'BTC网络难度调整显示出矿工信心恢复，长期持有者地址数量增加...',
-    type: '📈',
-    score: 6
-  },
-  {
-    title: 'Solana推出手机Saga新版本',
-    content: '移动端体验优化，集成Web3功能，用户增长加速...',
-    type: '💡',
-    score: 5
-  },
-  {
-    title: '美SEC推迟多个以太坊ETF决策',
-    content: '监管不确定性增加，市场等待更多明确信号...',
-    type: '📈',
-    score: 7
-  },
-  {
-    title: 'DeFi总锁仓量回升至500亿美元',
-    content: '主要协议TVL增长，显示DeFi市场开始复苏...',
-    type: '🎯',
-    score: 6
+  translate: true,  // 是否翻译内容
+  translation: {
+    provider: 'free',
+    apiKey: ''
   }
-];
-
-let mockDataIndex = 0;
+};
 
 // 点击扩展图标时打开侧边栏
 chrome.action.onClicked.addListener(async (tab) => {
@@ -185,6 +150,9 @@ chrome.runtime.onInstalled.addListener(async () => {
 
   // 先加载已处理的ID
   await initializeProcessedIds();
+
+  // 启动定时清理任务（每48小时执行一次）
+  startPeriodicCleanup();
 
   // 初始化存储
   chrome.storage.local.get([
@@ -262,6 +230,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'exportConfig':
       exportConfig()
         .then(config => sendResponse({ success: true, config }))
+        .catch(error => sendResponse({ success: false, error: error.message }));
+      return true;
+
+    case 'translateItem':
+      translateItem(request.item)
+        .then(translated => sendResponse({ success: true, translated }))
         .catch(error => sendResponse({ success: false, error: error.message }));
       return true;
 
@@ -392,53 +366,86 @@ function startJin10Monitoring(config) {
 
 async function fetchJin10Data(config) {
   try {
-    console.log('获取金十数据...');
+    console.log('[金十] 获取数据...');
 
-    // 获取不同的模拟数据
-    const mockId = 'jin10_' + Date.now() + '_' + mockDataIndex;
-    const dataItem = mockDataItems[mockDataIndex];
-
-    const mockData = {
-      id: mockId,
-      title: dataItem.title,
-      content: dataItem.content,
-      type: dataItem.type,
-      score: dataItem.score,
-      time: Date.now(),
-      source: 'jin10',
-      url: 'https://www.jin10.com/',
-      value: dataItem.content
-    };
-
-    // 循环使用不同的模拟数据
-    mockDataIndex = (mockDataIndex + 1) % mockDataItems.length;
-
-    // 检查是否已处理过（使用持久化的ID检查）
-    const isNew = await addProcessedId(STORAGE_KEYS.PROCESSED_IDS, mockId);
-    if (!isNew) {
-      console.log('已处理过，跳过:', mockId);
+    // 获取金十快讯数据
+    const response = await fetch('https://www.jin10.com/static/timeline.json');
+    if (!response.ok) {
+      console.log('[金十] 获取失败:', response.status);
       return;
     }
 
-    console.log('新数据:', mockData.title);
+    const data = await response.json();
+    const items = data?.data?.item || data || [];
 
-    // 分析数据
-    await analyzeAndProcess(mockData);
+    console.log('[金十] 获取到', items.length, '条数据');
+
+    // 处理最新数据（取前10条）
+    for (const item of items.slice(0, 10)) {
+      const id = 'jin10_' + (item.id || item._id || Date.now() + Math.random());
+
+      // 检查是否已处理过
+      const isNew = await addProcessedId(STORAGE_KEYS.PROCESSED_IDS, id);
+      if (!isNew) {
+        continue;
+      }
+
+      // 构建数据项
+      const dataItem = {
+        id: id,
+        title: item.title || item.content || item.data?.content || '',
+        content: item.content || item.data?.content || '',
+        type: classifyJin10Post(item),
+        score: calculateJin10Score(item),
+        time: item.time || item.created_at || Date.now(),
+        source: 'jin10',
+        url: item.url || item.link || `https://www.jin10.com/detail/${item.id}`,
+        value: item.content || item.data?.content || ''
+      };
+
+      console.log('[金十] 新数据:', dataItem.title.substring(0, 30));
+
+      // 分析和处理
+      await analyzeAndProcess(dataItem);
+    }
 
   } catch (error) {
-    console.error('获取金十数据失败:', error);
+    console.error('[金十] 获取数据失败:', error);
   }
 }
 
-// ============ Twitter 监控 ============
-function startTwitterMonitoring(config) {
-  console.log('启动 Twitter 监控');
-  // TODO: 实现 Twitter 数据抓取
+// 分类金十帖子
+function classifyJin10Post(item) {
+  const text = (item.title + ' ' + (item.content || '')).toLowerCase();
+
+  if (text.includes('降息') || text.includes('加息') || text.includes('利率') || text.includes('fed') || text.includes('美联储')) {
+    return '📈';
+  } else if (text.includes('etf') || text.includes('基金') || text.includes('上市')) {
+    return '🎯';
+  } else if (text.includes('突发') || text.includes('快讯') || text.includes('重要')) {
+    return '💡';
+  }
+
+  return '💡';
 }
 
-async function fetchTwitterData(config) {
-  // TODO: 实现
+// 计算金十帖子评分
+function calculateJin10Score(item) {
+  let score = 5;
+
+  const text = (item.title + ' ' + (item.content || '')).toLowerCase();
+
+  // 重要关键词加分
+  if (text.includes('突发') || text.includes('重要')) score += 2;
+  if (text.includes('美联储') || text.includes('fed')) score += 1;
+  if (text.includes('etf') || text.includes('比特币')) score += 1;
+
+  return Math.min(10, score);
 }
+
+
+// 翻译缓存
+const translationCache = new Map();
 
 // ============ 翻译工具 ============
 async function translateText(text, from = 'en', to = 'zh') {
@@ -450,19 +457,161 @@ async function translateText(text, from = 'en', to = 'zh') {
     return text;
   }
 
+  // 检查缓存
+  const cacheKey = text.substring(0, 100);
+  if (translationCache.has(cacheKey)) {
+    console.log('[翻译] 使用缓存');
+    return translationCache.get(cacheKey);
+  }
+
   try {
-    // 使用免费的 MyMemory 翻译 API
-    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${from}|${to}`;
+    // 获取翻译配置
+    const result = await chrome.storage.local.get(['config']);
+    const config = result.config || {};
+    const translation = config.translation || { provider: 'free', apiKey: '' };
+
+    // Debug: 打印配置信息
+    console.log('[翻译] 当前配置:', {
+      provider: translation.provider,
+      hasApiKey: !!translation.apiKey,
+      apiKeyLength: translation.apiKey?.length || 0
+    });
+
+    let translated = '';
+
+    if (translation.provider === 'glm') {
+      translated = await translateWithGLM(text, translation.apiKey);
+    } else if (translation.provider === 'deepseek') {
+      translated = await translateWithDeepSeek(text, translation.apiKey);
+    } else {
+      translated = await translateWithFree(text, from, to);
+    }
+
+    // 缓存结果
+    if (translated && translated !== text) {
+      translationCache.set(cacheKey, translated);
+      if (translationCache.size > 200) {
+        const firstKey = translationCache.keys().next().value;
+        translationCache.delete(firstKey);
+      }
+    }
+
+    return translated || text;
+
+  } catch (error) {
+    console.error('[翻译] 失败:', error.message);
+    return text;
+  }
+}
+
+// GLM 翻译
+async function translateWithGLM(text, apiKey) {
+  if (!apiKey) {
+    console.warn('[GLM] 未配置 API Key，使用原文');
+    return text;
+  }
+
+  try {
+    const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + apiKey
+      },
+      body: JSON.stringify({
+        model: 'glm-4-flash',
+        messages: [
+          { role: 'user', content: 'Translate to Chinese (only return the translation, no explanation):\n\n' + text.substring(0, 500) }
+        ],
+        temperature: 0.3
+      })
+    });
+
+    const data = await response.json();
+    if (data.choices && data.choices[0]?.message?.content) {
+      console.log('[GLM] 翻译成功');
+      return data.choices[0].message.content.trim();
+    } else {
+      console.warn('[GLM] 返回格式异常:', data);
+      return text;
+    }
+  } catch (error) {
+    console.error('[GLM] 请求失败:', error.message);
+    return text;
+  }
+}
+
+// DeepSeek 翻译
+async function translateWithDeepSeek(text, apiKey) {
+  if (!apiKey) {
+    console.warn('[DeepSeek] 未配置 API Key，使用原文');
+    return text;
+  }
+
+  try {
+    const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + apiKey
+      },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'user', content: 'Translate to Chinese (only return the translation, no explanation):\n\n' + text.substring(0, 500) }
+        ],
+        temperature: 0.3
+      })
+    });
+
+    const data = await response.json();
+    if (data.choices && data.choices[0]?.message?.content) {
+      console.log('[DeepSeek] 翻译成功');
+      return data.choices[0].message.content.trim();
+    } else {
+      console.warn('[DeepSeek] 返回格式异常:', data);
+      return text;
+    }
+  } catch (error) {
+    console.error('[DeepSeek] 请求失败:', error.message);
+    return text;
+  }
+}
+
+// 免费 API 翻译
+async function translateWithFree(text, from = 'en', to = 'zh') {
+  try {
+    const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text.substring(0, 300)) + '&langpair=' + from + '|' + to;
     const response = await fetch(url);
     const data = await response.json();
 
     if (data.responseStatus === 200 && data.responseData?.translatedText) {
+      console.log('[免费API] 翻译成功');
       return data.responseData.translatedText;
+    } else if (data.responseStatus === 429) {
+      console.warn('[免费API] 配额用完');
+      return text;
+    } else {
+      console.warn('[免费API] 返回异常:', data.responseStatus);
+      return text;
     }
-    return text;
   } catch (error) {
-    console.error('[翻译] 失败:', error.message);
+    console.error('[免费API] 失败:', error.message);
     return text;
+  }
+}
+
+// 翻译单项（用于懒翻译）
+async function translateItem(item) {
+  try {
+    const translated = {
+      title: await translateText(item.title || ''),
+      value: await translateText(item.value || '')
+    };
+    return translated;
+  } catch (error) {
+    console.error('[翻译单项] 失败:', error.message);
+    return { title: item.title, value: item.value };
   }
 }
 
@@ -476,10 +625,13 @@ function startRedditMonitoring(config) {
   // 立即执行一次
   fetchRedditData(config);
 
-  // 每5分钟执行一次
+  // 每2分钟执行一次
   fetchIntervals.reddit = setInterval(() => {
+    console.log('[Reddit] 定时触发 -', new Date().toLocaleTimeString());
     fetchRedditData(config);
-  }, 300000);
+  }, 120000);
+
+  console.log('[Reddit] 监控已启动，每2分钟检查一次新内容');
 }
 
 async function fetchRedditData(config) {
@@ -494,7 +646,8 @@ async function fetchRedditData(config) {
     const shouldTranslate = config.translate !== false;
 
     for (const subreddit of subreddits) {
-      const url = 'https://www.reddit.com/' + subreddit + '/hot.json?limit=5';
+      // 使用 new.json 获取最新帖子，而不是 hot.json
+      const url = 'https://www.reddit.com/' + subreddit + '/new.json?limit=15';
       console.log('[Reddit] 正在获取:', url);
 
       try {
@@ -536,10 +689,16 @@ async function fetchRedditData(config) {
             url: 'https://www.reddit.com' + redditData.permalink,
             subreddit: subreddit,
             author: redditData.author,
+            num_comments: redditData.num_comments || 0,
             value: extractRedditValue(redditData, translatedContent)
           };
 
-          console.log('[Reddit] 帖子:', item.title, '评分:', item.score, '类型:', item.type);
+          console.log('[Reddit] 数据:', {
+            title: item.title.substring(0, 30),
+            author: item.author,
+            num_comments: item.num_comments,
+            time: item.time
+          });
 
           // 检查是否已处理过（使用持久化的ID检查）
           const isNew = await addProcessedId(STORAGE_KEYS.REDDIT_PROCESSED_IDS, item.id);
@@ -558,6 +717,8 @@ async function fetchRedditData(config) {
         console.error('[Reddit] ' + subreddit + ' 错误: ' + error.message);
       }
     }
+
+    console.log('[Reddit] 本轮检查完成 -', new Date().toLocaleTimeString());
 
   } catch (error) {
     console.error('[Reddit] 获取失败:', error);
@@ -632,9 +793,9 @@ async function analyzeAndProcess(item) {
       await updateStats('total');
 
       if (processedItem.score >= config.thresholds.notificationScore) {
-        console.log('[处理] 评分达到通知阈值，发送通知');
-        // 发送通知
-        await sendNotification(processedItem);
+        console.log('[处理] 评分达到通知阈值');
+        // 通知功能已禁用
+        // await sendNotification(processedItem);
         await updateStats('valuable');
       }
 
@@ -651,43 +812,102 @@ async function analyzeAndProcess(item) {
 }
 
 // ============ 通知和存储 ============
-async function sendNotification(item) {
-  // 检查静默时段
-  if (await isQuietHours()) {
-    console.log('静默时段，跳过通知');
-    return;
-  }
+// Chrome 通知功能已禁用
+// async function sendNotification(item) {
+//   // 检查静默时段
+//   if (await isQuietHours()) {
+//     console.log('静默时段，跳过通知');
+//     return;
+//   }
+//
+//   // 创建 Chrome 通知
+//   const notificationId = item.id;
+//
+//   chrome.notifications.create(notificationId, {
+//     type: 'basic',
+//     iconUrl: chrome.runtime.getURL('icons/icon.svg'),
+//     title: `${item.type} ${getSourceLabel(item.source)}`,
+//     message: `${item.title}\n评分: ${item.score}/10`,
+//     priority: 2,
+//     requireInteraction: false
+//   }, (notificationId) => {
+//     if (chrome.runtime.lastError) {
+//       console.error('通知创建失败:', chrome.runtime.lastError);
+//     } else {
+//       console.log('通知已发送:', notificationId);
+//     }
+//   });
+// }
 
-  // 创建 Chrome 通知
-  const notificationId = item.id;
+// ============ 定期清理 ============
+let cleanupTimer = null;
 
-  chrome.notifications.create(notificationId, {
-    type: 'basic',
-    iconUrl: chrome.runtime.getURL('icons/icon.svg'),
-    title: `${item.type} ${getSourceLabel(item.source)}`,
-    message: `${item.title}\n评分: ${item.score}/10`,
-    priority: 2,
-    requireInteraction: false
-  }, (notificationId) => {
-    if (chrome.runtime.lastError) {
-      console.error('通知创建失败:', chrome.runtime.lastError);
-    } else {
-      console.log('通知已发送:', notificationId);
-    }
-  });
+function startPeriodicCleanup() {
+  // 每48小时执行一次清理（48 * 60 * 60 * 1000 = 172800000 毫秒）
+  const cleanupInterval = 48 * 60 * 60 * 1000;
+
+  // 启动时先执行一次清理（删除超过24小时的数据）
+  cleanOldData();
+
+  // 设置定时器
+  cleanupTimer = setInterval(() => {
+    cleanOldData();
+  }, cleanupInterval);
+
+  console.log('[清理] 定时任务已启动，每48小时清理一次');
 }
 
+async function cleanOldData() {
+  try {
+    console.log('[清理] 开始清理超过24小时的数据...');
+
+    const result = await chrome.storage.local.get(['recentNotifications']);
+    let recent = result.recentNotifications || [];
+
+    // 删除超过24小时的数据
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const beforeCount = recent.length;
+
+    recent = recent.filter(item => {
+      return item.timestamp && item.timestamp > oneDayAgo;
+    });
+
+    const afterCount = recent.length;
+    const cleanedCount = beforeCount - afterCount;
+
+    if (cleanedCount > 0) {
+      await chrome.storage.local.set({ recentNotifications: recent });
+      console.log(`[清理] 删除了 ${cleanedCount} 条超过24小时的数据`);
+    } else {
+      console.log('[清理] 没有需要清理的数据');
+    }
+
+  } catch (error) {
+    console.error('[清理] 失败:', error);
+  }
+}
+
+// ============ 通知和存储 ============
 async function addRecentNotification(item) {
   const result = await chrome.storage.local.get(['recentNotifications']);
   let recent = result.recentNotifications || [];
 
+  // 去重：检查是否已存在相同 id
+  const existingIndex = recent.findIndex(r => r.id === item.id);
+  if (existingIndex !== -1) {
+    // 已存在，直接返回，不重复添加
+    console.log('[去重] 数据已存在，跳过:', item.id);
+    return;
+  }
+
   // 添加到开头
   recent.unshift(item);
 
-  // 只保留最近50条
-  recent = recent.slice(0, 50);
+  // 每天最多显示 3000 条数据
+  recent = recent.slice(0, 3000);
 
   await chrome.storage.local.set({ recentNotifications: recent });
+  console.log('[存储] 已添加到通知列表，当前数量:', recent.length);
 }
 
 async function updateStats(type) {

@@ -4,6 +4,8 @@
 const twitterUsersInput = document.getElementById('twitter-users');
 const twitterKeywordsInput = document.getElementById('twitter-keywords');
 const redditSubredditsInput = document.getElementById('reddit-subreddits');
+const translateProviderSelect = document.getElementById('translate-provider');
+const translateApiKeyInput = document.getElementById('translate-api-key');
 const importJsonInput = document.getElementById('import-json');
 const saveBtn = document.getElementById('save-btn');
 const cancelBtn = document.getElementById('cancel-btn');
@@ -37,12 +39,21 @@ async function loadConfig() {
         twitterKeywordsInput.value = config.twitter.keywords.join('\n');
       }
     }
-
     // Reddit 配置
     if (config.reddit) {
-      if (config.reddit.subreddits && config.reddit.subreddits.length > 0) {
+      // 优先使用原始文本（保留备注），否则使用数组
+      if (config.reddit.subredditsRaw) {
+        redditSubredditsInput.value = config.reddit.subredditsRaw;
+      } else if (config.reddit.subreddits && config.reddit.subreddits.length > 0) {
         redditSubredditsInput.value = config.reddit.subreddits.join('\n');
       }
+    }
+    if (config.translation) {
+      console.log('[加载配置] translation config:', config.translation);
+      translateProviderSelect.value = config.translation.provider || 'free';
+      translateApiKeyInput.value = config.translation.apiKey || '';
+    } else {
+      console.log('[加载配置] 没有找到 translation 配置');
     }
 
   } catch (error) {
@@ -66,7 +77,6 @@ function bindEvents() {
   // 导出配置
   exportBtn.addEventListener('click', exportConfig);
 }
-
 // 保存配置
 async function saveConfig() {
   try {
@@ -74,6 +84,14 @@ async function saveConfig() {
     const twitterUsers = parseTextarea(twitterUsersInput.value);
     const twitterKeywords = parseTextarea(twitterKeywordsInput.value);
     const redditSubreddits = parseTextarea(redditSubredditsInput.value);
+    const translateProvider = translateProviderSelect.value;
+    const translateApiKey = translateApiKeyInput.value.trim();
+
+    // 验证：如果选择 GLM 或 DeepSeek，必须填写 API Key
+    if ((translateProvider === 'glm' || translateProvider === 'deepseek') && !translateApiKey) {
+      alert('请填写 API Key');
+      return;
+    }
 
     // 获取当前配置
     const result = await chrome.storage.local.get(['config']);
@@ -88,20 +106,28 @@ async function saveConfig() {
 
     config.reddit = {
       ...config.reddit,
-      subreddits: redditSubreddits
+      subreddits: redditSubreddits,
+      // 保存原始文本用于显示备注
+      subredditsRaw: redditSubredditsInput.value
+    };
+
+    config.translation = {
+      provider: translateProvider,
+      apiKey: translateApiKey
     };
 
     // 保存到存储
+    console.log('[保存配置] translation:', { provider: translateProvider, hasApiKey: !!translateApiKey });
     await chrome.storage.local.set({ config });
-
-    // 显示成功提示
-    alert('配置已保存！');
 
     // 通知 background 更新
     chrome.runtime.sendMessage({
       action: 'updateConfig',
       sources: config.sources
     });
+
+    // 显示成功提示
+    alert('配置已保存！');
 
   } catch (error) {
     console.error('保存配置失败:', error);
@@ -115,10 +141,15 @@ function parseTextarea(text) {
 
   return text
     .split('\n')
-    .map(line => line.trim())
+    .map(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return '';
+      // 只取空格前的部分（忽略中文备注）
+      const parts = trimmed.split(/\s+/);
+      return parts[0];
+    })
     .filter(line => line.length > 0);
 }
-
 // 导入配置
 async function importConfig() {
   const jsonString = importJsonInput.value.trim();

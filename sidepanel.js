@@ -23,6 +23,76 @@ const foldedSections = {
   recent: false
 };
 
+// 懒加载状态
+let currentOffset = 0;
+const pageSize = 30;
+let allRecentData = [];
+let isLoadingMore = false;
+
+// 翻译状态
+const translatedItems = new Set(); // 已翻译的 ID
+let translationQueue = []; // 翻译队列
+let isTranslating = false; // 是否正在翻译
+
+// 检测是否为中文（简单判断：中文字符占比）
+function isChineseText(text) {
+  if (!text) return false;
+  const chineseRegex = /[\u4e00-\u9fa5]/;
+  const chineseChars = text.match(chineseRegex);
+  if (!chineseChars) return false;
+  return chineseChars.length > text.length / 5; // 中文占 20% 以上认为是已翻译
+}
+
+// 懒翻译处理
+async function processLazyTranslation() {
+  if (isTranslating) return;
+
+  const itemsNeedingTranslation = recentListEl.querySelectorAll('.recent-item[data-needs-translate="true"]');
+
+  for (const itemEl of itemsNeedingTranslation) {
+    const id = itemEl.dataset.id;
+    if (translatedItems.has(id)) continue; // 已翻译过，跳过
+
+    isTranslating = true;
+
+    try {
+      // 获取原始数据
+      const item = allRecentData.find(d => d.id === id);
+      if (!item) continue;
+
+      // 发送翻译请求
+      const response = await chrome.runtime.sendMessage({
+        action: 'translateItem',
+        item: {
+          title: item.title,
+          value: ''
+        }
+      });
+
+      if (response && response.success) {
+        // 更新显示
+        const titleEl = itemEl.querySelector('.recent-title');
+
+        if (titleEl && response.translated.title) {
+          titleEl.textContent = response.translated.title;
+        }
+
+        // 标记为已翻译
+        itemEl.dataset.needsTranslate = 'false';
+        translatedItems.add(id);
+      }
+
+      // 翻译间隔，避免 API 限制
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+    } catch (error) {
+      console.error('[懒翻译] 失败:', error);
+    }
+
+    isTranslating = false;
+  }
+}
+
 // 页面加载时初始化
 document.addEventListener('DOMContentLoaded', init);
 
@@ -45,6 +115,9 @@ async function init() {
 
   // 应用折叠状态
   applyFoldedState();
+
+  // 绑定滚动加载
+  bindScrollLoad();
 }
 
 // 应用折叠状态
@@ -123,7 +196,7 @@ async function loadStats() {
 }
 
 // 加载最近通知
-async function loadRecent() {
+async function loadRecent(append = false) {
   return new Promise((resolve) => {
     chrome.storage.local.get(['recentNotifications'], (result) => {
       const recent = result.recentNotifications || [];
@@ -135,41 +208,134 @@ async function loadRecent() {
             <div>暂无通知</div>
           </div>
         `;
+        allRecentData = [];
+        currentOffset = 0;
         resolve();
         return;
       }
 
-      recentListEl.innerHTML = recent.slice(0, 50).map(item => `
-        <div class="recent-item" data-id="${item.id}">
-          <div class="recent-header">
-            <span class="recent-type">${item.type || '💡'}</span>
-            <span class="recent-source">${getSourceLabel(item.source)}</span>
-            <span class="recent-time">${formatTime(item.timestamp)}</span>
-          </div>
-          <div class="recent-title">${escapeHtml(item.title)}</div>
-          ${item.value ? `<div class="recent-value">${escapeHtml(item.value)}</div>` : ''}
-          <div class="recent-footer">
-            <span class="recent-score">评分: ${item.score || 'N/A'}/10</span>
-            <div class="recent-actions">
-              ${item.url ? `<button class="recent-btn recent-btn-link" data-url="${escapeHtml(item.url)}">查看</button>` : ''}
-              <button class="recent-btn recent-btn-fav" data-id="${item.id}">收藏</button>
-            </div>
-          </div>
-        </div>
-      `).join('');
+      // 保存所有数据
+      allRecentData = recent;
 
-      // 绑定事件
-      bindRecentItemEvents();
+      // 如果不是追加模式，重置偏移量
+      if (!append) {
+        currentOffset = 0;
+        recentListEl.innerHTML = '';
+      }
+
+      // 渲染第一批数据
+      renderRecentItems();
 
       resolve();
     });
   });
 }
 
+// 渲染通知项（懒加载）
+function renderRecentItems() {
+  const endIndex = Math.min(currentOffset + pageSize, allRecentData.length);
+  const itemsToRender = allRecentData.slice(currentOffset, endIndex);
+
+  if (itemsToRender.length === 0 && currentOffset === 0) {
+    recentListEl.innerHTML = `
+      <div class="empty-state">
+        <div style="font-size: 32px; margin-bottom: 8px;">📭</div>
+        <div>暂无通知</div>
+      </div>
+    `;
+    return;
+  }
+
+  // 生成 HTML
+  const itemsHtml = itemsToRender.map(item => {
+    const titleEscaped = escapeHtml(item.title);
+    const needsTranslate = !isChineseText(titleEscaped);
+
+    return `
+    <div class="recent-item" data-id="${item.id}" data-needs-translate="${needsTranslate ? 'true' : 'false'}">
+      <div class="recent-header">
+        <span class="recent-type">${item.type || '💡'}</span>
+        <span class="recent-source">${getSourceLabel(item.source)}${item.subreddit ? ' · ' + item.subreddit : ''}</span>
+        <span class="recent-score">${item.score || 'N/A'}/10</span>
+        <div class="recent-actions">
+          ${item.url ? `<button class="recent-btn recent-btn-link" data-url="${escapeHtml(item.url)}">查看</button>` : ''}
+          <button class="recent-btn recent-btn-fav" data-id="${item.id}">收藏</button>
+        </div>
+      </div>
+      <div class="recent-title">${titleEscaped}</div>
+    </div>
+    `;
+  }).join('');
+
+  // 添加到列表
+  if (currentOffset === 0) {
+    recentListEl.innerHTML = itemsHtml;
+  } else {
+    recentListEl.insertAdjacentHTML('beforeend', itemsHtml);
+  }
+
+  // 更新偏移量
+  currentOffset = endIndex;
+
+  // 绑定事件
+  bindRecentItemEvents();
+
+  // 触发懒翻译
+  setTimeout(() => processLazyTranslation(), 500);
+
+  // 检查是否还有更多数据
+  updateLoadMoreButton();
+}
+
+// 更新"加载更多"按钮状态
+function updateLoadMoreButton() {
+  // 移除旧的加载提示
+  const oldHint = recentListEl.querySelector('.load-more-hint');
+  if (oldHint) {
+    oldHint.remove();
+  }
+
+  // 如果还有更多数据，显示提示
+  if (currentOffset < allRecentData.length) {
+    const hint = document.createElement('div');
+    hint.className = 'load-more-hint';
+    hint.textContent = `还有 ${allRecentData.length - currentOffset} 条，滚动加载更多`;
+    hint.style.cssText = 'text-align: center; padding: 12px; color: #888; font-size: 13px;';
+    recentListEl.appendChild(hint);
+  } else if (allRecentData.length > 0) {
+    const hint = document.createElement('div');
+    hint.className = 'load-more-hint';
+    hint.textContent = '已加载全部';
+    hint.style.cssText = 'text-align: center; padding: 12px; color: #888; font-size: 13px;';
+    recentListEl.appendChild(hint);
+  }
+}
+
+// 绑定滚动加载
+function bindScrollLoad() {
+  recentListEl.addEventListener('scroll', () => {
+    if (isLoadingMore) return;
+
+    const scrollTop = recentListEl.scrollTop;
+    const scrollHeight = recentListEl.scrollHeight;
+    const clientHeight = recentListEl.clientHeight;
+
+    // 滚动到底部附近时加载更多
+    if (scrollTop + clientHeight >= scrollHeight - 50) {
+      if (currentOffset < allRecentData.length) {
+        isLoadingMore = true;
+        renderRecentItems();
+        isLoadingMore = false;
+      }
+    }
+  });
+}
+
 // 绑定通知项事件
 function bindRecentItemEvents() {
   // 查看原文按钮
-  recentListEl.querySelectorAll('.recent-btn-link').forEach(btn => {
+  recentListEl.querySelectorAll('.recent-btn-link:not(.bound)').forEach(btn => {
+    btn.classList.add('bound');
     btn.addEventListener('click', () => {
       const url = btn.dataset.url;
       if (url) {
@@ -179,7 +345,8 @@ function bindRecentItemEvents() {
   });
 
   // 收藏按钮
-  recentListEl.querySelectorAll('.recent-btn-fav').forEach(btn => {
+  recentListEl.querySelectorAll('.recent-btn-fav:not(.bound)').forEach(btn => {
+    btn.classList.add('bound');
     btn.addEventListener('click', async () => {
       const id = btn.dataset.id;
 

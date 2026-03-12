@@ -70,6 +70,9 @@ async function loadFavorites() {
 function groupBySourceAndDate(favorites) {
   const grouped = {};
 
+  // 先按时间戳排序（最新的在前）
+  favorites.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
   favorites.forEach(item => {
     const source = item.source;
     const date = new Date(item.timestamp).toLocaleDateString('zh-CN');
@@ -106,7 +109,12 @@ function renderFavorites(grouped) {
 
   sources.forEach(source => {
     const sourceLabel = getSourceLabel(source);
-    const dates = Object.keys(grouped[source]);
+    // 对日期排序（最新的在前）
+    const dates = Object.keys(grouped[source]).sort((a, b) => {
+      const dateA = new Date(a.split('/').reverse().join('-'));
+      const dateB = new Date(b.split('/').reverse().join('-'));
+      return dateB - dateA;
+    });
 
     html += `<div class="section-title">${sourceLabel}</div>`;
 
