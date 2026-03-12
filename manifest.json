@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "信息流监控助手",
-  "version": "1.0.0",
+  "name": "信息流监控助手（持久化版）",
+  "version": "1.1.0",
   "description": "监控金十数据、X/Twitter、Reddit，AI 分析价值并推送",
   "permissions": [
     "storage",

@@ -1,74 +1,9 @@
-// 信息流监控助手 - 后台服务（持久化版本）
+// 信息流监控助手 - 后台服务
 
 // ============ 状态管理 ============
 let isRunning = false;
 let monitoringInterval = null;
 let fetchIntervals = {};
-
-// 已处理ID的存储键
-const STORAGE_KEYS = {
-  PROCESSED_IDS: 'processedIds_v2',
-  REDDIT_PROCESSED_IDS: 'redditProcessedIds_v2',
-  LAST_FETCH_TIME: 'lastFetchTime'
-};
-
-// 加载已处理的ID
-async function loadProcessedIds(key) {
-  try {
-    const result = await chrome.storage.local.get([key]);
-    const ids = result[key] || [];
-    return new Set(ids);
-  } catch (error) {
-    console.error('[加载ID] 失败:', error);
-    return new Set();
-  }
-}
-
-// 保存已处理的ID
-async function saveProcessedIds(key, idSet) {
-  try {
-    // 只保留最近1000个ID，避免存储过大
-    const ids = Array.from(idSet).slice(-1000);
-    await chrome.storage.local.set({ [key]: ids });
-  } catch (error) {
-    console.error('[保存ID] 失败:', error);
-  }
-}
-
-// 检查并添加已处理的ID
-async function addProcessedId(key, id, maxSize = 1000) {
-  let idSet;
-  if (key === STORAGE_KEYS.REDDIT_PROCESSED_IDS) {
-    idSet = redditProcessedIds;
-  } else {
-    idSet = processedIds;
-  }
-
-  idSet.add(id);
-
-  // 清理旧ID
-  if (idSet.size > maxSize) {
-    const ids = Array.from(idSet);
-    const toRemove = ids.slice(0, Math.floor(maxSize / 2));
-    toRemove.forEach(id => idSet.delete(id));
-  }
-
-  // 异步保存到存储（不阻塞）
-  saveProcessedIds(key, idSet);
-
-  return idSet.has(id);
-}
-
-// 初始化时加载已处理的ID
-let processedIds = new Set();
-let redditProcessedIds = new Set();
-
-async function initializeProcessedIds() {
-  console.log('[初始化] 加载已处理的ID...');
-  processedIds = await loadProcessedIds(STORAGE_KEYS.PROCESSED_IDS);
-  redditProcessedIds = await loadProcessedIds(STORAGE_KEYS.REDDIT_PROCESSED_IDS);
-  console.log('[初始化] 已加载', processedIds.size, '个金十ID,', redditProcessedIds.size, '个Reddit ID');
-}
 
 // 默认配置
 const defaultConfig = {
@@ -141,17 +76,17 @@ const mockDataItems = [
 
 let mockDataIndex = 0;
 
+// Reddit 已处理的ID集合
+const redditProcessedIds = new Set();
+
 // 点击扩展图标时打开侧边栏
 chrome.action.onClicked.addListener(async (tab) => {
   await chrome.sidePanel.open({ windowId: tab.windowId });
 });
 
 // 初始化
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(() => {
   console.log('信息流监控助手已安装');
-
-  // 先加载已处理的ID
-  await initializeProcessedIds();
 
   // 初始化存储
   chrome.storage.local.get([
@@ -229,12 +164,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'exportConfig':
       exportConfig()
         .then(config => sendResponse({ success: true, config }))
-        .catch(error => sendResponse({ success: false, error: error.message }));
-      return true;
-
-    case 'clearProcessedIds':
-      clearProcessedIds()
-        .then(() => sendResponse({ success: true }))
         .catch(error => sendResponse({ success: false, error: error.message }));
       return true;
 
@@ -357,6 +286,9 @@ function startJin10Monitoring(config) {
   }, 30000);
 }
 
+// 已处理的ID集合（去重）
+const processedIds = new Set();
+
 async function fetchJin10Data(config) {
   try {
     console.log('获取金十数据...');
@@ -380,14 +312,19 @@ async function fetchJin10Data(config) {
     // 循环使用不同的模拟数据
     mockDataIndex = (mockDataIndex + 1) % mockDataItems.length;
 
-    // 检查是否已处理过（使用持久化的ID检查）
-    const isNew = await addProcessedId(STORAGE_KEYS.PROCESSED_IDS, mockId);
-    if (!isNew) {
-      console.log('已处理过，跳过:', mockId);
+    // 检查是否已处理过
+    if (processedIds.has(mockId)) {
+      console.log('已处理过，跳过');
       return;
     }
 
-    console.log('新数据:', mockData.title);
+    processedIds.add(mockId);
+
+    // 清理旧ID
+    if (processedIds.size > 1000) {
+      const oldIds = Array.from(processedIds).slice(0, 500);
+      oldIds.forEach(id => processedIds.delete(id));
+    }
 
     // 分析数据
     await analyzeAndProcess(mockData);
@@ -508,14 +445,19 @@ async function fetchRedditData(config) {
 
           console.log('[Reddit] 帖子:', item.title, '评分:', item.score, '类型:', item.type);
 
-          // 检查是否已处理过（使用持久化的ID检查）
-          const isNew = await addProcessedId(STORAGE_KEYS.REDDIT_PROCESSED_IDS, item.id);
-          if (!isNew) {
+          // 检查是否已处理过
+          if (redditProcessedIds.has(item.id)) {
             console.log('[Reddit] 已处理过，跳过:', item.id);
             continue;
           }
 
-          console.log('[Reddit] 新帖子:', item.title);
+          redditProcessedIds.add(item.id);
+
+          // 清理旧ID
+          if (redditProcessedIds.size > 500) {
+            const oldIds = Array.from(redditProcessedIds).slice(0, 250);
+            oldIds.forEach(id => redditProcessedIds.delete(id));
+          }
 
           // 分析和处理
           await analyzeAndProcess(item);
@@ -753,24 +695,6 @@ async function exportConfig() {
   };
 }
 
-// ============ 清理已处理的ID ============
-async function clearProcessedIds() {
-  console.log('[清理] 清空所有已处理的ID');
-
-  // 清空内存
-  processedIds.clear();
-  redditProcessedIds.clear();
-
-  // 清空存储
-  await chrome.storage.local.remove([
-    STORAGE_KEYS.PROCESSED_IDS,
-    STORAGE_KEYS.REDDIT_PROCESSED_IDS
-  ]);
-
-  console.log('[清理] 已清空，重新开始');
-  return true;
-}
-
 // ============ 工具函数 ============
 function getSourceLabel(source) {
   const labels = {
@@ -795,4 +719,4 @@ async function isQuietHours() {
   return currentTime >= config.quietHours.start || currentTime <= config.quietHours.end;
 }
 
-console.log('信息流监控助手后台服务已加载（持久化版本）');
+console.log('信息流监控助手后台服务已加载');
