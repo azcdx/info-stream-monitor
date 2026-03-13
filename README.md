@@ -1,15 +1,15 @@
 # 信息流监控助手
 
-> Chrome 插件 - 监控金十数据、Reddit，AI 分析价值并推送
+> Chrome 插件 - 监控 Reddit，AI 分析价值并推送
 
 ## 功能特性
 
-- 🔍 **多源监控** - 金十数据、Reddit 两大信息源
+- 🔍 **多源监控** - Reddit 信息源
 - 🤖 **AI 分析** - 自动判断信息价值（机会/知识/趋势/灵感）
-- 📊 **侧边栏面板** - 实时信息流，懒加载翻译
+- 📊 **侧边栏面板** - HN 风格信息流，懒加载翻译
 - ⭐ **收藏管理** - 收藏有价值的信息
 - 🌐 **多语言翻译** - 支持 GLM/DeepSeek API 翻译
-- 🧹 **自动清理** - 每 48 小时清理超过 24 小时的数据
+- 💾 **数据同步** - 支持 Markdown/JSON 导出导入，Git 同步
 
 ## 项目结构
 
@@ -20,6 +20,11 @@ info-stream-monitor/
 ├── sidepanel.html/js   # 侧边栏面板
 ├── config.html/js      # 配置页面
 ├── favorites.html/js   # 收藏页面
+├── data_manager.js     # 数据导入导出工具
+├── data/               # 数据存储目录（Git 同步）
+│   ├── subreddits.md   # 订阅配置
+│   ├── favorites.md    # 收藏数据
+│   └── README.md       # 格式说明
 └── icons/              # 图标
 ```
 
@@ -47,19 +52,42 @@ info-stream-monitor/
 订阅 Subreddit（每行一个）：
 r/ethereum 以太坊
 r/cryptocurrency 加密货币
-r/Anthropic Claude AI
 r/OpenAI OpenAI
 ```
 
 ### 2. 开始监控
 
-1. 选择要监控的源（金十/Reddit）
+1. 选择要监控的源（Reddit）
 2. 点击"开始"
 3. 信息流会实时显示在侧边栏中
 
 ### 3. 收藏有价值的信息
 
-点击信息卡片右下角的 "收藏" 按钮保存到收藏夹。
+点击信息卡片右侧的 "收藏" 按钮保存到收藏夹。
+
+## 数据同步（Git）
+
+### 导出数据
+
+在配置页面：
+1. 点击 "导出配置" → 保存到 `data/subreddits.md`
+2. 点击 "导出收藏" → 保存到 `data/favorites.md`
+3. 或点击 "全部备份" → 保存为 `data/backup_YYYY-MM-DD.json`
+
+### 同步到 Git
+
+```bash
+git add data/
+git commit -m "更新订阅配置"
+git push
+```
+
+### 其他设备恢复
+
+```bash
+git pull
+# 在配置页面点击"选择文件"导入
+```
 
 ## 技术栈
 
@@ -77,7 +105,6 @@ r/OpenAI OpenAI
 **存储限制：**
 - 最多保存 3000 条数据
 - 超过部分从最早删除
-- 每 48 小时自动清理超过 24 小时的数据
 
 ## 许可证
 
