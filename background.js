@@ -4,12 +4,14 @@
 let isRunning = false;
 let fetchIntervals = {};
 let lastMonitorTime = 0; // 上次监控开始时间
+let lastMonitorStopTime = 0; // 上次监控停止时间
 
 // 已处理ID的存储键
 const STORAGE_KEYS = {
   PROCESSED_IDS: 'processedIds_v3',
   REDDIT_PROCESSED_IDS: 'redditProcessedIds_v3',
-  LAST_MONITOR_TIME: 'lastMonitorTime'
+  LAST_MONITOR_TIME: 'lastMonitorTime',
+  LAST_MONITOR_STOP_TIME: 'lastMonitorStopTime'
 };
 
 // 加载已处理的ID（带时间戳）
@@ -280,17 +282,26 @@ async function startMonitoring(sources) {
       throw new Error('请至少选择一个监控源');
     }
 
-    // 记录监控开始时间（避免抓取旧数据）
+    // 清除已有的定时器
+    clearAllFetchIntervals();
+
+    // 先立即抓取一次数据（获取停止期间的新帖子）
+    console.log('[监控] 立即抓取一次，获取停止期间的新数据...');
+    if (config.sources.jin10) {
+      await fetchJin10Data(config);
+    }
+    if (config.sources.reddit) {
+      await fetchRedditData(config);
+    }
+
+    // 抓取完成后，再记录监控开始时间（用于后续过滤）
     lastMonitorTime = Date.now();
     await chrome.storage.local.set({ [STORAGE_KEYS.LAST_MONITOR_TIME]: lastMonitorTime });
     console.log('[监控] 记录开始时间:', new Date(lastMonitorTime).toLocaleString());
 
-    // 清除已有的定时器
-    clearAllFetchIntervals();
-
-    // 启动各个源的监控
+    // 启动各个源的定时监控
     if (config.sources.jin10) {
-      console.log('启动金十监控');
+      console.log('启动金十定时监控');
       startJin10Monitoring(config);
     }
 
@@ -300,7 +311,7 @@ async function startMonitoring(sources) {
     }
 
     if (config.sources.reddit) {
-      console.log('启动 Reddit 监控');
+      console.log('启动 Reddit 定时监控');
       startRedditMonitoring(config);
     }
 
@@ -323,10 +334,10 @@ async function stopMonitoring() {
   // 清除所有定时器
   clearAllFetchIntervals();
 
-  // 重置监控开始时间
-  lastMonitorTime = 0;
-  await chrome.storage.local.remove(STORAGE_KEYS.LAST_MONITOR_TIME);
-  console.log('[监控] 已重置开始时间');
+  // 保存停止时间
+  lastMonitorStopTime = Date.now();
+  await chrome.storage.local.set({ [STORAGE_KEYS.LAST_MONITOR_STOP_TIME]: lastMonitorStopTime });
+  console.log('[监控] 记录停止时间:', new Date(lastMonitorStopTime).toLocaleString());
 
   // 更新状态
   isRunning = false;
