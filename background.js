@@ -2,6 +2,7 @@
 
 // ============ 状态管理 ============
 let isRunning = false;
+let isStarting = false; // 是否正在启动中
 let fetchIntervals = {};
 let lastMonitorTime = 0; // 上次监控开始时间
 let lastMonitorStopTime = 0; // 上次监控停止时间
@@ -258,19 +259,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // ============ 监控控制 ============
 async function startMonitoring(sources) {
-  console.log('开始监控:', sources);
+  console.log('[监控] ========== 开始启动流程 ==========');
+  console.log('[监控] 请求的源:', sources);
 
   // 防止重复启动
-  if (isRunning) {
-    console.log('已在运行中，跳过');
+  if (isRunning || isStarting) {
+    console.log('[监控] 已在运行或启动中，跳过');
     return true;
   }
 
+  isStarting = true;
+
   try {
+    // 先更新状态为运行中
+    isRunning = true;
+    await chrome.storage.local.set({ isRunning: true });
+    console.log('[监控] 状态已设置为运行中');
+
     // 获取当前配置
     const result = await chrome.storage.local.get(['config']);
     const config = result.config || defaultConfig;
-    console.log('当前配置:', JSON.stringify(config));
+    console.log('[监控] 当前配置:', JSON.stringify(config));
 
     // 更新源配置
     if (sources) {
@@ -282,16 +291,33 @@ async function startMonitoring(sources) {
       throw new Error('请至少选择一个监控源');
     }
 
+    console.log('[监控] 配置检查通过，开始启动...');
+
     // 清除已有的定时器
     clearAllFetchIntervals();
 
     // 先立即抓取一次数据（获取停止期间的新帖子）
     console.log('[监控] 立即抓取一次，获取停止期间的新数据...');
-    if (config.sources.jin10) {
-      await fetchJin10Data(config);
+    try {
+      if (config.sources.jin10) {
+        console.log('[监控] 抓取金十数据...');
+        await fetchJin10Data(config);
+        console.log('[监控] 金十数据抓取完成');
+      }
+      if (config.sources.reddit) {
+        console.log('[监控] 抓取 Reddit 数据...');
+        await fetchRedditData(config);
+        console.log('[监控] Reddit 数据抓取完成');
+      }
+    } catch (error) {
+      console.error('[监控] 立即抓取失败，继续启动:', error);
     }
-    if (config.sources.reddit) {
-      await fetchRedditData(config);
+
+    // 检查是否被停止了
+    if (!isRunning) {
+      console.log('[监控] 启动过程中被停止，取消启动');
+      isStarting = false;
+      return false;
     }
 
     // 抓取完成后，再记录监控开始时间（用于后续过滤）
@@ -301,25 +327,22 @@ async function startMonitoring(sources) {
 
     // 启动各个源的定时监控
     if (config.sources.jin10) {
-      console.log('启动金十定时监控');
+      console.log('[监控] 启动金十定时监控');
       startJin10Monitoring(config);
     }
 
     if (config.sources.twitter) {
-      console.log('启动 Twitter 监控');
+      console.log('[监控] 启动 Twitter 监控');
       startTwitterMonitoring(config);
     }
 
     if (config.sources.reddit) {
-      console.log('启动 Reddit 定时监控');
+      console.log('[监控] 启动 Reddit 定时监控');
       startRedditMonitoring(config);
     }
 
-    // 更新状态
-    isRunning = true;
-    await chrome.storage.local.set({ isRunning: true });
-
-    console.log('监控已启动');
+    isStarting = false;
+    console.log('[监控] ========== 监控已启动 ==========');
     return true;
 
   } catch (error) {
@@ -329,21 +352,25 @@ async function startMonitoring(sources) {
 }
 
 async function stopMonitoring() {
-  console.log('停止监控');
+  console.log('[监控] ========== 停止监控 ==========');
+
+  // 先设置状态为停止，阻止正在进行的抓取
+  isRunning = false;
+  isStarting = false;
 
   // 清除所有定时器
   clearAllFetchIntervals();
+  console.log('[监控] 已清除定时器');
 
   // 保存停止时间
   lastMonitorStopTime = Date.now();
   await chrome.storage.local.set({ [STORAGE_KEYS.LAST_MONITOR_STOP_TIME]: lastMonitorStopTime });
   console.log('[监控] 记录停止时间:', new Date(lastMonitorStopTime).toLocaleString());
 
-  // 更新状态
-  isRunning = false;
+  // 更新存储状态
   await chrome.storage.local.set({ isRunning: false });
 
-  console.log('监控已停止');
+  console.log('[监控] ========== 监控已停止 ==========');
   return true;
 }
 
@@ -388,6 +415,12 @@ function startJin10Monitoring(config) {
 }
 
 async function fetchJin10Data(config) {
+  // 检查是否还在运行
+  if (!isRunning && !isStarting) {
+    console.log('[金十] 监控已停止，跳过抓取');
+    return;
+  }
+
   try {
     console.log('[金十] 获取数据...');
 
@@ -405,6 +438,12 @@ async function fetchJin10Data(config) {
 
     // 处理最新数据（取前10条）
     for (const item of items.slice(0, 10)) {
+      // 检查是否还在运行
+      if (!isRunning && !isStarting) {
+        console.log('[金十] 监控已停止，中断处理');
+        break;
+      }
+
       const id = 'jin10_' + (item.id || item._id || Date.now() + Math.random());
       const itemTime = item.time || item.created_at || Date.now();
 
@@ -667,6 +706,12 @@ function startRedditMonitoring(config) {
 }
 
 async function fetchRedditData(config) {
+  // 检查是否还在运行
+  if (!isRunning && !isStarting) {
+    console.log('[Reddit] 监控已停止，跳过抓取');
+    return;
+  }
+
   try {
     console.log('[Reddit] 获取真实数据...');
 
@@ -678,6 +723,18 @@ async function fetchRedditData(config) {
     const shouldTranslate = config.translate !== false;
 
     for (const subreddit of subreddits) {
+      // 检查是否还在运行
+      if (!isRunning && !isStarting) {
+        console.log('[Reddit] 监控已停止，中断抓取');
+        break;
+      }
+
+      // 请求间隔，避免触发速率限制
+      if (subreddits.indexOf(subreddit) > 0) {
+        console.log('[Reddit] 等待 2 秒后请求下一个 subreddit...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+
       // 使用 new.json 获取最新帖子，而不是 hot.json
       const url = 'https://www.reddit.com/' + subreddit + '/new.json?limit=15';
       console.log('[Reddit] 正在获取:', url);
@@ -685,6 +742,10 @@ async function fetchRedditData(config) {
       try {
         const response = await fetch(url);
         if (!response.ok) {
+          if (response.status === 429) {
+            console.log('[Reddit] ' + subreddit + ' 触发速率限制，等待 5 秒...');
+            await new Promise(resolve => setTimeout(resolve, 5000));
+          }
           console.log('[Reddit] ' + subreddit + ' 失败: ' + response.status);
           continue;
         }
@@ -695,14 +756,51 @@ async function fetchRedditData(config) {
         console.log('[Reddit] ' + subreddit + ' 获取到 ' + posts.length + ' 条帖子');
 
         for (const post of posts) {
+          // 检查是否还在运行
+          if (!isRunning && !isStarting) {
+            console.log('[Reddit] 监控已停止，中断处理');
+            break;
+          }
+
           const redditData = post.data;
 
-          // 翻译标题和内容
+          // 跳过监控开始时间之前的旧数据（防止长时间停止后重复抓取）
+          const postTimeMs = redditData.created_utc * 1000;
+          const fiveMinutesAgo = lastMonitorTime - 300000;
+
+          if (lastMonitorTime > 0 && postTimeMs < fiveMinutesAgo) {
+            console.log('[Reddit] 跳过旧数据:', redditData.title.substring(0, 30));
+            continue;
+          }
+
+          // 先计算评分，不翻译
+          const rawScore = calculateRedditScore(redditData);
+
+          console.log('[Reddit] 数据:', {
+            title: redditData.title.substring(0, 30),
+            author: redditData.author,
+            num_comments: redditData.num_comments,
+            score: rawScore
+          });
+
+          // 检查是否已处理过（使用持久化的ID检查）
+          const itemId = 'reddit_' + redditData.id;
+          const isNew = await addProcessedId(STORAGE_KEYS.REDDIT_PROCESSED_IDS, itemId);
+          if (!isNew) {
+            console.log('[Reddit] 已处理过，跳过:', itemId);
+            continue;
+          }
+
+          // 获取配置检查面板阈值
+          const configResult = await chrome.storage.local.get(['config']);
+          const panelThreshold = configResult.config?.thresholds?.panelScore || 5;
+
+          // 只有评分达到阈值才翻译
           let translatedTitle = redditData.title;
           let translatedContent = redditData.selftext || redditData.url || '';
 
-          if (shouldTranslate) {
-            console.log('[Reddit] 正在翻译...');
+          if (rawScore >= panelThreshold && shouldTranslate) {
+            console.log('[Reddit] 评分', rawScore, '达标，开始翻译...');
             translatedTitle = await translateText(redditData.title);
             if (redditData.selftext) {
               translatedContent = await translateText(redditData.selftext);
@@ -711,11 +809,11 @@ async function fetchRedditData(config) {
           }
 
           const item = {
-            id: 'reddit_' + redditData.id,
+            id: itemId,
             title: translatedTitle,
             content: translatedContent,
             type: classifyRedditPost(redditData),
-            score: calculateRedditScore(redditData),
+            score: rawScore,
             time: redditData.created_utc * 1000,
             source: 'reddit',
             url: 'https://www.reddit.com' + redditData.permalink,
@@ -724,20 +822,6 @@ async function fetchRedditData(config) {
             num_comments: redditData.num_comments || 0,
             value: extractRedditValue(redditData, translatedContent)
           };
-
-          console.log('[Reddit] 数据:', {
-            title: item.title.substring(0, 30),
-            author: item.author,
-            num_comments: item.num_comments,
-            time: item.time
-          });
-
-          // 检查是否已处理过（使用持久化的ID检查）
-          const isNew = await addProcessedId(STORAGE_KEYS.REDDIT_PROCESSED_IDS, item.id);
-          if (!isNew) {
-            console.log('[Reddit] 已处理过，跳过:', item.id);
-            continue;
-          }
 
           console.log('[Reddit] 新帖子:', item.title);
 
@@ -778,18 +862,25 @@ function classifyRedditPost(post) {
 function calculateRedditScore(post) {
   let score = 5;
 
-  const upvoteRatio = post.upvote_ratio || 0.5;
-  score += Math.floor(upvoteRatio * 2);
-
-  if (post.score > 100) score += 2;
-  if (post.score > 500) score += 1;
-
+  // 1. 评论数（最高优先级）- 讨论活跃度
+  if (post.num_comments > 10) score += 2;
+  if (post.num_comments > 30) score += 1;
   if (post.num_comments > 50) score += 1;
+  if (post.num_comments > 100) score += 1;
   if (post.num_comments > 200) score += 1;
 
+  // 2. 新鲜度（第二优先级）- 信息时效性
   const hoursOld = (Date.now() / 1000 - post.created_utc) / 3600;
-  if (hoursOld < 6) score += 1;
-  if (hoursOld < 24) score += 1;
+  if (hoursOld < 6) score += 2;
+  else if (hoursOld < 24) score += 1;
+
+  // 3. 投票数（第三优先级）- 社区认可度
+  if (post.score > 100) score += 1;
+  if (post.score > 500) score += 1;
+
+  // 4. 点赞比例（最低优先级）- 正面评价
+  const upvoteRatio = post.upvote_ratio || 0.5;
+  if (upvoteRatio > 0.8) score += 1;
 
   return Math.min(10, score);
 }
@@ -826,7 +917,7 @@ async function analyzeAndProcess(item) {
 
     // 判断是否需要处理
     if (processedItem.score >= config.thresholds.panelScore) {
-      console.log('[处理] 评分达到面板阈值，添加到列表');
+      console.log('[处理] 评分', processedItem.score, '达到面板阈值', config.thresholds.panelScore, '✅ 添加到列表');
       // 更新统计
       await updateStats('total');
 
@@ -841,7 +932,7 @@ async function analyzeAndProcess(item) {
       await addRecentNotification(processedItem);
       console.log('[处理] 已添加到最近通知');
     } else {
-      console.log('[处理] 评分未达到面板阈值，跳过');
+      console.log('[处理] 评分', processedItem.score, '低于面板阈值', config.thresholds.panelScore, '❌ 跳过');
     }
 
   } catch (error) {

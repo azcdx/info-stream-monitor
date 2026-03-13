@@ -193,84 +193,75 @@
     }
 
     .recent-item {
-      padding: 5px 8px;
-      border-radius: 5px;
-      margin-bottom: 3px;
-      background: #f9fafb;
-      border-left: 2px solid #667eea;
-      transition: background 0.2s;
+      padding: 4px 0;
+      margin-bottom: 2px;
+      transition: background 0.15s;
     }
 
     .recent-item:hover {
-      background: #f3f4f6;
+      background: rgba(0, 0, 0, 0.03);
+      border-radius: 3px;
     }
 
-    .recent-header {
+    .recent-title {
+      font-size: 13px;
+      font-weight: 400;
+      color: #1f2937;
+      line-height: 1.4;
+      padding: 2px 0;
+    }
+
+    .recent-title-link {
+      font-size: 13px;
+      font-weight: 400;
+      color: #1f2937;
+      line-height: 1.4;
+      padding: 2px 0;
+      text-decoration: none;
+    }
+
+    .recent-title-link:hover {
+      text-decoration: underline;
+    }
+
+    .recent-meta {
       display: flex;
-      justify-content: space-between;
       align-items: center;
-      margin-bottom: 3px;
-      flex-wrap: wrap;
-      gap: 4px;
-    }
-
-    .recent-type {
+      gap: 6px;
       font-size: 11px;
+      color: #828282;
+      padding: 2px 0;
+      flex-wrap: wrap;
     }
 
     .recent-source {
-      font-size: 9px;
-      padding: 1px 5px;
-      border-radius: 4px;
-      background: rgba(102, 126, 234, 0.1);
-      color: #667eea;
-      flex: 1;
+      color: #828282;
     }
 
     .recent-score {
-      font-size: 9px;
-      color: #f59e0b;
-      font-weight: 500;
-      white-space: nowrap;
+      color: #828282;
     }
 
     .recent-actions {
       display: flex;
-      gap: 3px;
-    }
-
-    .recent-title {
-      font-size: 11px;
-      font-weight: 500;
-      color: #1f2937;
-      line-height: 1.3;
+      gap: 4px;
+      margin-left: auto;
     }
 
     .recent-btn {
-      padding: 2px 6px;
+      padding: 1px 6px;
       border: none;
-      border-radius: 3px;
-      font-size: 9px;
+      border-radius: 2px;
+      font-size: 11px;
       cursor: pointer;
-      transition: all 0.2s;
+      transition: all 0.15s;
+      background: transparent;
+      color: #828282;
     }
 
-    .recent-btn-link {
-      background: #dbeafe;
-      color: #2563eb;
-    }
-
-    .recent-btn-link:hover {
-      background: #bfdbfe;
-    }
-
-    .recent-btn-fav {
-      background: #fef3c7;
-      color: #d97706;
-    }
-
-    .recent-btn-fav:hover {
-      background: #fde68a;
+    .recent-btn:hover {
+      background: rgba(0, 0, 0, 0.05);
+      color: #1f2937;
     }
 
     .empty-state {

@@ -98,6 +98,8 @@ document.addEventListener('DOMContentLoaded', init);
 
 // 初始化
 async function init() {
+  console.log('[前端] ========== sidepanel.js 已加载 ==========');
+
   // 加载配置
   await loadConfig();
 
@@ -158,18 +160,22 @@ async function loadConfig() {
 
 // 更新状态
 async function updateStatus() {
+  console.log('[前端] 更新状态...');
   return new Promise((resolve) => {
     chrome.storage.local.get(['isRunning'], (result) => {
+      console.log('[前端] 当前运行状态:', result.isRunning);
       if (result.isRunning) {
         statusEl.textContent = '🟢 监控中';
         statusEl.className = 'status running';
         startBtn.style.display = 'none';
         stopBtn.style.display = 'block';
+        console.log('[前端] 状态已更新：监控中');
       } else {
         statusEl.textContent = '⚪ 已停止';
         statusEl.className = 'status stopped';
         startBtn.style.display = 'block';
         stopBtn.style.display = 'none';
+        console.log('[前端] 状态已更新：已停止');
       }
       resolve();
     });
@@ -250,19 +256,21 @@ function renderRecentItems() {
   const itemsHtml = itemsToRender.map(item => {
     const titleEscaped = escapeHtml(item.title);
     const needsTranslate = !isChineseText(titleEscaped);
+    const titleHtml = item.url
+      ? `<a href="${escapeHtml(item.url)}" class="recent-title-link" data-id="${item.id}">${titleEscaped}</a>`
+      : `<span class="recent-title">${titleEscaped}</span>`;
 
     return `
     <div class="recent-item" data-id="${item.id}" data-needs-translate="${needsTranslate ? 'true' : 'false'}">
-      <div class="recent-header">
-        <span class="recent-type">${item.type || '💡'}</span>
-        <span class="recent-source">${getSourceLabel(item.source)}${item.subreddit ? ' · ' + item.subreddit : ''}</span>
+      ${titleHtml}
+      <div class="recent-meta">
+        <span class="recent-source">${getSourceLabel(item.source)}${item.subreddit ? '/' + item.subreddit : ''}</span>
+        ${item.num_comments ? `<span class="recent-comments">${item.num_comments} 评论</span>` : ''}
         <span class="recent-score">${item.score || 'N/A'}/10</span>
         <div class="recent-actions">
-          ${item.url ? `<button class="recent-btn recent-btn-link" data-url="${escapeHtml(item.url)}">查看</button>` : ''}
-          <button class="recent-btn recent-btn-fav" data-id="${item.id}">收藏</button>
+          <button class="recent-btn" data-id="${item.id}">收藏</button>
         </div>
       </div>
-      <div class="recent-title">${titleEscaped}</div>
     </div>
     `;
   }).join('');
@@ -333,11 +341,12 @@ function bindScrollLoad() {
 
 // 绑定通知项事件
 function bindRecentItemEvents() {
-  // 查看原文按钮
-  recentListEl.querySelectorAll('.recent-btn-link:not(.bound)').forEach(btn => {
-    btn.classList.add('bound');
-    btn.addEventListener('click', () => {
-      const url = btn.dataset.url;
+  // 标题链接点击处理
+  recentListEl.querySelectorAll('.recent-title-link:not(.bound)').forEach(link => {
+    link.classList.add('bound');
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const url = link.getAttribute('href');
       if (url) {
         chrome.tabs.create({ url: url });
       }
@@ -345,7 +354,7 @@ function bindRecentItemEvents() {
   });
 
   // 收藏按钮
-  recentListEl.querySelectorAll('.recent-btn-fav:not(.bound)').forEach(btn => {
+  recentListEl.querySelectorAll('.recent-btn:not(.bound)').forEach(btn => {
     btn.classList.add('bound');
     btn.addEventListener('click', async () => {
       const id = btn.dataset.id;
@@ -375,13 +384,19 @@ function bindRecentItemEvents() {
 
 // 绑定事件
 function bindEvents() {
+  console.log('[前端] 绑定事件监听器...');
+  console.log('[前端] startBtn:', startBtn);
+  console.log('[前端] stopBtn:', stopBtn);
+
   // 开始监控
   startBtn.addEventListener('click', () => {
+    console.log('[前端] startBtn 被点击!');
     startMonitoring();
   });
 
   // 停止监控
   stopBtn.addEventListener('click', () => {
+    console.log('[前端] stopBtn 被点击!');
     stopMonitoring();
   });
 
@@ -453,11 +468,15 @@ async function saveConfig() {
 
 // 开始监控
 function startMonitoring() {
+  console.log('[前端] 点击开始监控按钮');
+
   const sources = {
     jin10: jin10Checkbox.checked,
     twitter: twitterCheckbox.checked,
     reddit: redditCheckbox.checked
   };
+
+  console.log('[前端] 选中的源:', sources);
 
   // 检查是否至少选择了一个源
   if (!sources.jin10 && !sources.twitter && !sources.reddit) {
@@ -465,14 +484,22 @@ function startMonitoring() {
     return;
   }
 
+  console.log('[前端] 发送启动消息到 background');
   chrome.runtime.sendMessage({
     action: 'startMonitoring',
     sources: sources
   }, (response) => {
+    console.log('[前端] 收到响应:', response);
+    console.log('[前端] response.success:', response?.success);
+    console.log('[前端] response.error:', response?.error);
     if (response && response.success) {
+      console.log('[前端] 启动成功，更新状态');
       updateStatus();
     } else if (response && response.error) {
+      console.error('[前端] 启动失败:', response.error);
       alert('启动失败：' + response.error);
+    } else {
+      console.error('[前端] 未知响应:', response);
     }
   });
 }
