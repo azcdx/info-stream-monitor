@@ -10,16 +10,20 @@ const totalCountEl = document.getElementById('total-count');
 const valuableCountEl = document.getElementById('valuable-count');
 const favoriteCountEl = document.getElementById('favorite-count');
 const recentListEl = document.getElementById('recent-list');
+const unreadCountEl = document.getElementById('unread-count');
+const pulseZoneEl = document.getElementById('pulse-zone');
 
 // 源复选框
 const jin10Checkbox = document.getElementById('jin10');
 const twitterCheckbox = document.getElementById('twitter');
 const redditCheckbox = document.getElementById('reddit');
 
-// 折叠状态
-const foldedSections = { sources: true, stats: true, recent: false };
+// 折叠状态（默认折叠通知）
+const foldedSections = { sources: true, stats: true, recent: true };
 
-// 懒加载状态
+// 缓冲区（新信息暂存）
+let newItemsBuffer = [];
+let lastLoadedCount = 0;
 let currentOffset = 0;
 const pageSize = 30;
 let allRecentData = [];
@@ -84,6 +88,7 @@ async function init() {
   bindEvents();
   applyFoldedState();
   bindScrollLoad();
+  bindPulseZone();
 }
 
 document.addEventListener('DOMContentLoaded', init);
@@ -143,6 +148,14 @@ async function loadRecent() {
   const result = await chrome.storage.local.get(['recentNotifications']);
   const recent = result.recentNotifications || [];
 
+  // 检测新信息（缓冲区逻辑）
+  if (recent.length > lastLoadedCount) {
+    const newItems = recent.slice(0, recent.length - lastLoadedCount);
+    newItemsBuffer = [...newItems, ...newItemsBuffer];
+    updatePulseZone();
+    updateUnreadCount();
+  }
+
   if (recent.length === 0) {
     recentListEl.innerHTML = `
       <div class="empty-state">
@@ -152,6 +165,7 @@ async function loadRecent() {
     `;
     allRecentData = [];
     currentOffset = 0;
+    lastLoadedCount = 0;
     return;
   }
 
@@ -159,12 +173,18 @@ async function loadRecent() {
   currentOffset = 0;
   recentListEl.innerHTML = '';
   renderRecentItems();
+  lastLoadedCount = recent.length;
 }
 
 // 渲染通知项 - HN 风格
 function renderRecentItems() {
-  const endIndex = Math.min(currentOffset + pageSize, allRecentData.length);
-  const itemsToRender = allRecentData.slice(currentOffset, endIndex);
+  // 排除缓冲区中的新信息（未释放）
+  const displayData = newItemsBuffer.length > 0
+    ? allRecentData.slice(newItemsBuffer.length)
+    : allRecentData;
+
+  const endIndex = Math.min(currentOffset + pageSize, displayData.length);
+  const itemsToRender = displayData.slice(currentOffset, endIndex);
 
   if (itemsToRender.length === 0 && currentOffset === 0) {
     recentListEl.innerHTML = `
@@ -220,13 +240,17 @@ function updateLoadMoreButton() {
   const oldHint = recentListEl.querySelector('.load-more-hint');
   if (oldHint) oldHint.remove();
 
-  if (currentOffset < allRecentData.length) {
+  const displayData = newItemsBuffer.length > 0
+    ? allRecentData.slice(newItemsBuffer.length)
+    : allRecentData;
+
+  if (currentOffset < displayData.length) {
     const hint = document.createElement('div');
     hint.className = 'load-more-hint';
-    hint.textContent = `还有 ${allRecentData.length - currentOffset} 条，滚动加载更多`;
+    hint.textContent = `还有 ${displayData.length - currentOffset} 条，滚动加载更多`;
     hint.style.cssText = 'text-align: center; padding: 12px; color: #888; font-size: 13px;';
     recentListEl.appendChild(hint);
-  } else if (allRecentData.length > 0) {
+  } else if (displayData.length > 0) {
     const hint = document.createElement('div');
     hint.className = 'load-more-hint';
     hint.textContent = '已加载全部';
@@ -243,7 +267,11 @@ function bindScrollLoad() {
     const scrollHeight = recentListEl.scrollHeight;
     const clientHeight = recentListEl.clientHeight;
 
-    if (scrollTop + clientHeight >= scrollHeight - 50 && currentOffset < allRecentData.length) {
+    const displayData = newItemsBuffer.length > 0
+      ? allRecentData.slice(newItemsBuffer.length)
+      : allRecentData;
+
+    if (scrollTop + clientHeight >= scrollHeight - 50 && currentOffset < displayData.length) {
       isLoadingMore = true;
       renderRecentItems();
       isLoadingMore = false;
@@ -375,6 +403,50 @@ function formatTime(timestamp) {
   if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前';
   if (diff < 86400000) return Math.floor(diff / 3600000) + '小时前';
   return new Date(timestamp).toLocaleDateString('zh-CN');
+}
+
+// 更新未读数量显示
+function updateUnreadCount() {
+  if (newItemsBuffer.length > 0) {
+    unreadCountEl.textContent = `(${newItemsBuffer.length})`;
+  } else {
+    unreadCountEl.textContent = '';
+  }
+}
+
+// 更新跳动区
+function updatePulseZone() {
+  if (newItemsBuffer.length === 0) {
+    pulseZoneEl.classList.remove('show');
+    return;
+  }
+
+  const latestItem = newItemsBuffer[0];
+  const sourceLabel = getSourceLabel(latestItem.source);
+  const title = escapeHtml(latestItem.title || '');
+  const subreddit = latestItem.subreddit ? '/' + latestItem.subreddit : '';
+
+  pulseZoneEl.innerHTML = `
+    <div class="pulse-content">
+      <span class="source">⚡ ${sourceLabel}${subreddit}</span> ${title.substring(0, 60)}${title.length > 60 ? '...' : ''}
+    </div>
+  `;
+  pulseZoneEl.classList.add('show');
+}
+
+// 绑定跳动区事件
+function bindPulseZone() {
+  const el = document.getElementById('pulse-zone');
+  if (el) {
+    el.addEventListener('click', () => {
+      newItemsBuffer = [];
+      updateUnreadCount();
+      updatePulseZone();
+      currentOffset = 0;
+      recentListEl.innerHTML = '';
+      renderRecentItems();
+    });
+  }
 }
 
 // HTML 转义

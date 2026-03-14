@@ -314,6 +314,60 @@
     .status.stopped {
       color: #f87171;
     }
+
+    /* 未读数量 */
+    .unread-count {
+      font-size: 11px;
+      color: #ef4444;
+      font-weight: 600;
+    }
+
+    /* 跳动区 */
+    .pulse-zone {
+      display: none;
+      padding: 8px 12px;
+      background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%);
+      border-bottom: 1px solid #fbbf24;
+      cursor: pointer;
+      animation: pulse-in 0.3s ease-out;
+    }
+
+    .pulse-zone.show {
+      display: block;
+    }
+
+    .pulse-zone:hover {
+      background: linear-gradient(90deg, #fde68a 0%, #fcd34d 100%);
+    }
+
+    .pulse-content {
+      font-size: 12px;
+      color: #92400e;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .pulse-content .source {
+      color: #b45309;
+      font-weight: 600;
+    }
+
+    @keyframes pulse-in {
+      from {
+        opacity: 0;
+        transform: translateY(-5px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes pulse-fade {
+      from { opacity: 1; }
+      to { opacity: 0; }
+    }
   </style>
 </head>
 <body>
@@ -370,10 +424,11 @@
 
     <div class="card recent-card">
       <div class="card-header" id="recent-toggle">
-        <span class="card-title">通知</span>
-        <span class="card-toggle"><span class="fold-indicator expanded">▼</span></span>
+        <span class="card-title">通知 <span class="unread-count" id="unread-count"></span></span>
+        <span class="card-toggle"><span class="fold-indicator">▼</span></span>
       </div>
-      <div class="card-body expanded" id="recent-body">
+      <div class="card-body" id="recent-body">
+        <div class="pulse-zone" id="pulse-zone"></div>
         <div class="recent" id="recent-list">
           <div class="empty-state">
             <div style="font-size: 24px; margin-bottom: 6px;">📭</div>

@@ -3,7 +3,6 @@
 // ============ 状态管理 ============
 let isRunning = false;
 let isStarting = false; // 是否正在启动中
-let fetchIntervals = {};
 let lastMonitorTime = 0; // 上次监控开始时间
 let lastMonitorStopTime = 0; // 上次监控停止时间
 
@@ -147,6 +146,38 @@ const defaultConfig = {
 // 点击扩展图标时打开侧边栏
 chrome.action.onClicked.addListener(async (tab) => {
   await chrome.sidePanel.open({ windowId: tab.windowId });
+});
+
+// ============ Alarms 监听（替代 setInterval）============
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (!isRunning) {
+    console.log('[Alarm] 监控未运行，跳过');
+    return;
+  }
+
+  console.log('[Alarm] 触发:', alarm.name, '-', new Date().toLocaleTimeString());
+
+  // 获取当前配置
+  const result = await chrome.storage.local.get(['config']);
+  const config = result.config || defaultConfig;
+
+  switch (alarm.name) {
+    case 'jin10':
+      if (config.sources.jin10) {
+        fetchJin10Data(config);
+      }
+      break;
+    case 'reddit':
+      if (config.sources.reddit) {
+        fetchRedditData(config);
+      }
+      break;
+    case 'twitter':
+      if (config.sources.twitter) {
+        // fetchTwitterData(config);
+      }
+      break;
+  }
 });
 
 // 初始化
@@ -375,12 +406,10 @@ async function stopMonitoring() {
 }
 
 function clearAllFetchIntervals() {
-  Object.keys(fetchIntervals).forEach(key => {
-    if (fetchIntervals[key]) {
-      clearInterval(fetchIntervals[key]);
-      delete fetchIntervals[key];
-    }
-  });
+  // 清除所有 alarms
+  chrome.alarms.clear('jin10');
+  chrome.alarms.clear('reddit');
+  chrome.alarms.clear('twitter');
 }
 
 async function updateConfig(sources) {
@@ -403,15 +432,13 @@ async function updateConfig(sources) {
 
 // ============ 金十数据监控 ============
 function startJin10Monitoring(config) {
-  console.log('启动金十数据监控');
+  console.log('[金十] 启动监控（使用 alarms）');
 
   // 立即执行一次
   fetchJin10Data(config);
 
-  // 每30秒执行一次
-  fetchIntervals.jin10 = setInterval(() => {
-    fetchJin10Data(config);
-  }, 30000);
+  // 每30秒执行一次（使用 chrome.alarms）
+  chrome.alarms.create('jin10', { periodInMinutes: 0.5 });
 }
 
 async function fetchJin10Data(config) {
@@ -696,13 +723,10 @@ function startRedditMonitoring(config) {
   // 立即执行一次
   fetchRedditData(config);
 
-  // 每2分钟执行一次
-  fetchIntervals.reddit = setInterval(() => {
-    console.log('[Reddit] 定时触发 -', new Date().toLocaleTimeString());
-    fetchRedditData(config);
-  }, 60000);
+  // 每1分钟执行一次（使用 chrome.alarms）
+  chrome.alarms.create('reddit', { periodInMinutes: 1 });
 
-  console.log('[Reddit] 监控已启动，每2分钟检查一次新内容');
+  console.log('[Reddit] 监控已启动，每1分钟检查一次新内容');
 }
 
 async function fetchRedditData(config) {

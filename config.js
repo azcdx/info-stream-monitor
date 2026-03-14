@@ -1,8 +1,6 @@
 // 配置页面脚本
 
 // DOM 元素
-const twitterUsersInput = document.getElementById('twitter-users');
-const twitterKeywordsInput = document.getElementById('twitter-keywords');
 const redditSubredditsInput = document.getElementById('reddit-subreddits');
 const translateProviderSelect = document.getElementById('translate-provider');
 const translateApiKeyInput = document.getElementById('translate-api-key');
@@ -38,16 +36,6 @@ async function loadConfig() {
   try {
     const result = await chrome.storage.local.get(['config']);
     const config = result.config || {};
-
-    // Twitter 配置
-    if (config.twitter) {
-      if (config.twitter.users?.length > 0) {
-        twitterUsersInput.value = config.twitter.users.join('\n');
-      }
-      if (config.twitter.keywords?.length > 0) {
-        twitterKeywordsInput.value = config.twitter.keywords.join('\n');
-      }
-    }
 
     // Reddit 配置
     if (config.reddit) {
@@ -115,8 +103,6 @@ function bindEvents() {
 // 保存配置
 async function saveConfig() {
   try {
-    const twitterUsers = parseTextarea(twitterUsersInput.value);
-    const twitterKeywords = parseTextarea(twitterKeywordsInput.value);
     const redditSubreddits = parseTextarea(redditSubredditsInput.value);
     const translateProvider = translateProviderSelect.value;
     const translateApiKey = translateApiKeyInput.value.trim();
@@ -129,7 +115,6 @@ async function saveConfig() {
     const result = await chrome.storage.local.get(['config']);
     const config = result.config || {};
 
-    config.twitter = { ...config.twitter, users: twitterUsers, keywords: twitterKeywords };
     config.reddit = {
       ...config.reddit,
       subreddits: redditSubreddits,
