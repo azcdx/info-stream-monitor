@@ -10,7 +10,9 @@
   ],
   "host_permissions": [
     "https://*.jin10.com/*",
-    "https://*.reddit.com/*"
+    "https://*.reddit.com/*",
+    "https://*.supabase.co/*",
+    "https://cdn.jsdelivr.net/*"
   ],
   "background": {
     "service_worker": "background.js"

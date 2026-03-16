@@ -281,6 +281,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         .catch(error => sendResponse({ success: false, error: error.message }));
       return true;
 
+    case 'syncMerge':
+      syncMerge()
+        .then(result => sendResponse({ success: true, message: result.message }))
+        .catch(error => sendResponse({ success: false, error: error.message }));
+      return true;
+
     default:
       sendResponse({ success: false, error: '未知操作' });
   }
@@ -1202,3 +1208,209 @@ async function isQuietHours() {
 }
 
 console.log('信息流监控助手后台服务已加载（持久化版本）');
+
+// ============ 云端同步（Supabase）============
+
+// Supabase 客户端实例
+let supabaseClient = null;
+let syncEnabled = false;
+
+// 初始化 Supabase 客户端
+async function initSupabaseClient() {
+  const result = await chrome.storage.local.get(['config']);
+  const config = result.config || {};
+
+  if (config.sync && config.sync.enabled && config.sync.url && config.sync.key) {
+    syncEnabled = true;
+    supabaseClient = {
+      url: config.sync.url.replace(/\/$/, ''),
+      key: config.sync.key,
+      userId: config.sync.userId || 'default',
+
+      async request(method, path, data = null) {
+        const url = this.url + '/rest/v1/' + path;
+        const headers = {
+          'apikey': this.key,
+          'Authorization': 'Bearer ' + this.key,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        };
+        const options = { method: method, headers: headers };
+        if (data) options.body = JSON.stringify(data);
+
+        const response = await fetch(url, options);
+        if (!response.ok) throw new Error('Supabase ' + method + ' failed: ' + response.status);
+        return await response.json();
+      },
+
+      async upsert(dataType, content) {
+        await this.request('DELETE', 'user_data?user_id=eq.' + encodeURIComponent(this.userId) + '&data_type=eq.' + encodeURIComponent(dataType));
+        return await this.request('POST', 'user_data', {
+          user_id: this.userId,
+          data_type: dataType,
+          content: content
+        });
+      },
+
+      async get(dataType) {
+        const result = await this.request('GET', 'user_data?user_id=eq.' + encodeURIComponent(this.userId) + '&data_type=eq.' + encodeURIComponent(dataType) + '&order=updated_at.desc&limit=1');
+        return result.length > 0 ? result[0].content : null;
+      }
+    };
+    console.log('[同步] Supabase 客户端已初始化');
+    return true;
+  } else {
+    syncEnabled = false;
+    supabaseClient = null;
+    return false;
+  }
+}
+
+// 从云端同步数据（下载覆盖本地）
+async function syncMerge() {
+  console.log('[同步] 从云端同步数据...');
+
+  const initialized = await initSupabaseClient();
+  if (!initialized) {
+    console.log('[同步] 同步未启用');
+    return;
+  }
+
+  try {
+    console.log('[同步] 拉取云端数据...');
+    const config = await supabaseClient.get('config') || {};
+    const favorites = await supabaseClient.get('favorites') || [];
+    const records = await supabaseClient.get('records') || [];
+    const stats = await supabaseClient.get('stats') || { total: 0, valuable: 0, favorite: 0 };
+
+    await chrome.storage.local.set({
+      config: config,
+      favorites: favorites,
+      recentNotifications: records,
+      stats: stats
+    });
+
+    console.log('[同步] 同步完成', {
+      config: Object.keys(config).length + ' 项',
+      favorites: favorites.length + ' 条',
+      records: records.length + ' 条',
+      stats: stats
+    });
+
+    return { success: true, message: '同步完成：从云端下载数据' };
+
+  } catch (error) {
+    console.error('[同步] 同步失败:', error);
+    throw error;
+  }
+}
+
+// 上传数据到云端（本地覆盖云端）
+async function syncUpload(data) {
+  console.log('[同步] 上传到云端...');
+
+  const initialized = await initSupabaseClient();
+  if (!initialized) {
+    throw new Error('同步未启用');
+  }
+
+  try {
+    const localData = await chrome.storage.local.get(['config', 'favorites', 'recentNotifications']);
+    
+    await supabaseClient.upsert('config', localData.config || {});
+    await supabaseClient.upsert('favorites', data.favorites || localData.favorites || []);
+    await supabaseClient.upsert('records', (data.records || localData.recentNotifications || []).slice(0, 1000));
+
+    console.log('[同步] 上传完成');
+    return { success: true, message: '数据已上传到云端' };
+  } catch (error) {
+    console.error('[同步] 上传失败:', error);
+    throw error;
+  }
+}
+
+// 从云端下载数据（云端覆盖本地）
+async function syncDownload() {
+  console.log('[同步] 从云端下载...');
+
+  const initialized = await initSupabaseClient();
+  if (!initialized) {
+    throw new Error('同步未启用');
+  }
+
+  try {
+    const config = await supabaseClient.get('config') || {};
+    const favorites = await supabaseClient.get('favorites') || [];
+    const records = await supabaseClient.get('records') || [];
+    const stats = await supabaseClient.get('stats') || { total: 0, valuable: 0, favorite: 0 };
+
+    await chrome.storage.local.set({ config });
+    await chrome.storage.local.set({ favorites });
+    await chrome.storage.local.set({ recentNotifications: records });
+    await chrome.storage.local.set({ stats });
+
+    console.log('[同步] 下载完成');
+    return { success: true, message: '下载完成：配置 ' + Object.keys(config).length + ' 项，收藏 ' + favorites.length + ' 条，记录 ' + records.length + ' 条' };
+  } catch (error) {
+    console.error('[同步] 下载失败:', error);
+    throw error;
+  }
+}
+
+
+// 监听数据变化，自动上传到云端
+let syncTimer = null;
+function scheduleAutoSync() {
+  if (!syncEnabled) return;
+
+  if (syncTimer) clearTimeout(syncTimer);
+
+  syncTimer = setTimeout(async () => {
+    try {
+      const localData = await chrome.storage.local.get(['config', 'favorites', 'recentNotifications', 'stats']);
+      
+      await supabaseClient.upsert('config', localData.config || {});
+      await supabaseClient.upsert('favorites', localData.favorites || []);
+      await supabaseClient.upsert('records', (localData.recentNotifications || []).slice(0, 1000));
+      await supabaseClient.upsert('stats', localData.stats || { total: 0, valuable: 0, favorite: 0 });
+      
+      console.log('[自动同步] 数据已上传到云端');
+    } catch (error) {
+      console.error('[自动同步] 失败:', error);
+    }
+  }, 3000);
+}
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local') {
+    initSupabaseClient();
+    
+    if (syncEnabled && (changes.favorites || changes.recentNotifications || changes.config || changes.stats)) {
+      console.log('[同步] 检测到数据变化，3秒后自动上传到云端');
+      scheduleAutoSync();
+    }
+  }
+});
+
+// 启动时从云端同步
+chrome.runtime.onStartup.addListener(async () => {
+  console.log('[同步] 浏览器启动，从云端同步数据');
+  try {
+    await syncMerge();
+  } catch (error) {
+    console.error('[启动同步] 失败:', error);
+  }
+});
+
+// 初始化时从云端同步一次
+setTimeout(async () => {
+  console.log('[同步] 初始化，从云端同步数据');
+  try {
+    await syncMerge();
+  } catch (error) {
+    console.error('[初始化同步] 失败:', error);
+  }
+}, 5000);
+
+// 初始化
+initSupabaseClient();

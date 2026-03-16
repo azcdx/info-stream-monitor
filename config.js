@@ -7,6 +7,13 @@ const translateApiKeyInput = document.getElementById('translate-api-key');
 const saveBtn = document.getElementById('save-btn');
 const cancelBtn = document.getElementById('cancel-btn');
 
+// 同步配置元素
+const syncEnabledSelect = document.getElementById('sync-enabled');
+const syncUserIdInput = document.getElementById('sync-user-id');
+const syncUrlInput = document.getElementById('sync-url');
+const syncKeyInput = document.getElementById('sync-key');
+const syncMergeBtn = document.getElementById('sync-merge-btn');
+
 // 导入/导出按钮
 const exportMdBtn = document.getElementById('export-md-btn');
 const exportJsonBtn = document.getElementById('export-json-btn');
@@ -53,6 +60,14 @@ async function loadConfig() {
       translateApiKeyInput.value = config.translation.apiKey || '';
     }
 
+    // 同步配置
+    if (config.sync) {
+      syncEnabledSelect.value = config.sync.enabled ? 'true' : 'false';
+      syncUserIdInput.value = config.sync.userId || '';
+      syncUrlInput.value = config.sync.url || '';
+      syncKeyInput.value = config.sync.key || '';
+    }
+
   } catch (error) {
     console.error('加载配置失败:', error);
   }
@@ -67,6 +82,9 @@ function updateSubredditCount(count) {
 function bindEvents() {
   saveBtn.addEventListener('click', saveConfig);
   cancelBtn.addEventListener('click', () => window.close());
+
+  // 同步按钮
+  syncMergeBtn.addEventListener('click', onSyncMerge);
 
   // 导出按钮
   exportMdBtn.addEventListener('click', onExportMarkdown);
@@ -112,6 +130,19 @@ async function saveConfig() {
       return;
     }
 
+    // 验证同步配置
+    const syncEnabled = syncEnabledSelect.value === 'true';
+    if (syncEnabled) {
+      const syncUserId = syncUserIdInput.value.trim();
+      const syncUrl = syncUrlInput.value.trim();
+      const syncKey = syncKeyInput.value.trim();
+
+      if (!syncUserId || !syncUrl || !syncKey) {
+        alert('启用同步时，请填写完整的 Supabase 配置');
+        return;
+      }
+    }
+
     const result = await chrome.storage.local.get(['config']);
     const config = result.config || {};
 
@@ -121,6 +152,12 @@ async function saveConfig() {
       subredditsRaw: redditSubredditsInput.value
     };
     config.translation = { provider: translateProvider, apiKey: translateApiKey };
+    config.sync = {
+      enabled: syncEnabled,
+      userId: syncUserIdInput.value.trim(),
+      url: syncUrlInput.value.trim(),
+      key: syncKeyInput.value.trim()
+    };
 
     await chrome.storage.local.set({ config });
 
@@ -130,6 +167,11 @@ async function saveConfig() {
     });
 
     alert('配置已保存！');
+    
+    // 如果启用同步，上传到云端
+    if (syncEnabled) {
+      chrome.runtime.sendMessage({ action: 'syncUpload', favorites: [], records: [] });
+    }
 
   } catch (error) {
     console.error('保存配置失败:', error);
@@ -243,4 +285,41 @@ function showImportStats(subreddits, favorites) {
   importSubredditCountEl.textContent = subreddits;
   importFavCountEl.textContent = favorites;
   importStatsEl.style.display = 'flex';
+}
+
+
+// ============ 云端同步功能 ============
+
+// 手动触发同步
+async function onSyncMerge() {
+  const result = await chrome.storage.local.get(['config']);
+  const config = result.config || {};
+
+  if (!config.sync || !config.sync.enabled) {
+    alert('请先启用云端同步');
+    return;
+  }
+
+  syncMergeBtn.disabled = true;
+  syncMergeBtn.textContent = '同步中...';
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      action: 'syncMerge'
+    });
+
+    if (response && response.success) {
+      alert('同步成功！\n' + response.message);
+      await loadConfig();
+    } else {
+      alert('同步失败：' + (response?.error || '未知错误'));
+    }
+
+  } catch (error) {
+    console.error('同步失败:', error);
+    alert('同步失败：' + error.message);
+  } finally {
+    syncMergeBtn.disabled = false;
+    syncMergeBtn.textContent = '从云端同步';
+  }
 }
