@@ -437,8 +437,8 @@ function startJin10Monitoring(config) {
   // 立即执行一次
   fetchJin10Data(config);
 
-  // 每30秒执行一次（使用 chrome.alarms）
-  chrome.alarms.create('jin10', { periodInMinutes: 0.5 });
+  // 每1分钟执行一次（chrome.alarms 最小间隔为1分钟）
+  chrome.alarms.create('jin10', { periodInMinutes: 1 });
 }
 
 async function fetchJin10Data(config) {
