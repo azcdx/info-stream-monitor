@@ -1385,17 +1385,21 @@ async function initSupabaseClient() {
       },
 
       async upsert(dataType, content) {
+        console.log('[upsert] 开始上传:', dataType, 'userId:', this.userId, '数据长度:', JSON.stringify(content).length);
         await this.request('DELETE', 'user_data?user_id=eq.' + encodeURIComponent(this.userId) + '&data_type=eq.' + encodeURIComponent(dataType));
-        return await this.request('POST', 'user_data', {
+        const result = await this.request('POST', 'user_data', {
           user_id: this.userId,
           data_type: dataType,
           content: content
         });
+        console.log('[upsert] 上传完成:', dataType);
       },
 
       async get(dataType) {
         const result = await this.request('GET', 'user_data?user_id=eq.' + encodeURIComponent(this.userId) + '&data_type=eq.' + encodeURIComponent(dataType) + '&order=updated_at.desc&limit=1');
-        return result.length > 0 ? result[0].content : null;
+        const content = result.length > 0 ? result[0].content : null;
+        console.log('[get] 下载:', dataType, 'userId:', this.userId, '结果:', content ? '有数据(' + JSON.stringify(content).length + '字节)' : '无数据');
+        return content;
       }
     };
     console.log('[同步] Supabase 客户端已初始化');
@@ -1546,6 +1550,12 @@ function scheduleAutoSync() {
   if (syncTimer) clearTimeout(syncTimer);
 
   syncTimer = setTimeout(async () => {
+    // 执行时再次检查 isSyncing（因为 syncMerge 可能已经释放锁）
+    if (isSyncing) {
+      console.log('[自动同步] 同步进行中，跳过上传');
+      return;
+    }
+
     try {
       const localData = await chrome.storage.local.get(['config', 'favorites', 'recentNotifications', 'stats', 'redditProcessedIds_v3', 'hnProcessedIds_v1']);
 
