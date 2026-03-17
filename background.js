@@ -1507,40 +1507,6 @@ async function syncUpload(data) {
 }
 
 // 从云端下载数据（云端覆盖本地）
-async function syncDownload() {
-  console.log('[同步] 从云端下载...');
-
-  const initialized = await initSupabaseClient();
-  if (!initialized) {
-    throw new Error('同步未启用');
-  }
-
-  try {
-    const config = await supabaseClient.get('config') || {};
-    const favorites = await supabaseClient.get('favorites') || [];
-    let records = await supabaseClient.get('records') || [];
-    const stats = await supabaseClient.get('stats') || { total: 0, valuable: 0, favorite: 0 };
-
-    // 如果超过3000条，删除最旧的1000条
-    if (records.length > 3000) {
-      console.log('[同步] 记录数超限(' + records.length + ')，删除最旧的1000条');
-      records = records.slice(0, records.length - 1000);
-    }
-
-    await chrome.storage.local.set({ config });
-    await chrome.storage.local.set({ favorites });
-    await chrome.storage.local.set({ recentNotifications: records });
-    await chrome.storage.local.set({ stats });
-
-    console.log('[同步] 下载完成');
-    return { success: true, message: '下载完成：配置 ' + Object.keys(config).length + ' 项，收藏 ' + favorites.length + ' 条，记录 ' + records.length + ' 条' };
-  } catch (error) {
-    console.error('[同步] 下载失败:', error);
-    throw error;
-  }
-}
-
-
 // 监听数据变化，自动上传到云端
 let syncTimer = null;
 let isSyncing = false;  // 同步锁
@@ -1585,26 +1551,6 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     }
   }
 });
-
-// 启动时从云端同步（已禁用，避免覆盖本地数据）
-// chrome.runtime.onStartup.addListener(async () => {
-//   console.log('[同步] 浏览器启动，从云端同步数据');
-//   try {
-//     await syncMerge();
-//   } catch (error) {
-//     console.error('[启动同步] 失败:', error);
-//   }
-// });
-
-// 初始化时从云端同步一次（已禁用，避免覆盖本地数据）
-// setTimeout(async () => {
-//   console.log('[同步] 初始化，从云端同步数据');
-//   try {
-//     await syncMerge();
-//   } catch (error) {
-//     console.error('[初始化同步] 失败:', error);
-//   }
-// }, 5000);
 
 // 初始化
 initSupabaseClient();
