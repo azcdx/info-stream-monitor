@@ -897,6 +897,7 @@ async function fetchHackerNewsData(config) {
       // 获取故事ID列表
       const listUrl = `https://hacker-news.firebaseio.com/v0/${topic}stories.json`;
       console.log('[HN] 获取列表:', listUrl);
+      let newCount = 0;  // 新故事计数
 
       const listResponse = await fetch(listUrl);
       if (!listResponse.ok) {
@@ -918,7 +919,7 @@ async function fetchHackerNewsData(config) {
         // 检查是否已处理
         const isNew = await addHnProcessedId(itemId);
         if (!isNew) {
-          continue;
+          console.log("[HN] 已处理，跳过:", storyId); continue;
         }
 
         // 获取故事详情
@@ -965,7 +966,8 @@ async function fetchHackerNewsData(config) {
           value: `HN ${topic} - ${storyScore} pts, ${story.descendants || 0} comments`
         };
 
-        console.log('[HN] 新故事:', item.title.substring(0, 40), '评分:', rawScore);
+        newCount++;
+        newCount++; console.log('[HN] 新故事:', item.title.substring(0, 40), '评分:', rawScore);
 
         await analyzeAndProcess(item);
 
@@ -978,6 +980,7 @@ async function fetchHackerNewsData(config) {
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
+      console.log('[HN] 本轮新增:', newCount, '个故事');
 
     console.log('[HN] 本轮检查完成 -', new Date().toLocaleTimeString());
 
