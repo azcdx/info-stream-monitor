@@ -1409,6 +1409,12 @@ async function initSupabaseClient() {
 
 // 从云端同步数据（下载覆盖本地）
 async function syncMerge() {
+  if (isSyncing) {
+    console.log('[同步] 同步进行中，跳过');
+    return { success: false, error: '同步进行中' };
+  }
+
+  isSyncing = true;
   console.log('[同步] 从云端同步数据...');
 
   const initialized = await initSupabaseClient();
@@ -1456,6 +1462,7 @@ async function syncMerge() {
       hnIds: Object.keys(hnIds).length + ' 个'
     });
 
+    isSyncing = false;
     return { success: true, message: '同步完成：从云端下载数据' };
 
   } catch (error) {
@@ -1532,8 +1539,9 @@ async function syncDownload() {
 
 // 监听数据变化，自动上传到云端
 let syncTimer = null;
+let isSyncing = false;  // 同步锁
 function scheduleAutoSync() {
-  if (!syncEnabled) return;
+  if (!syncEnabled || isSyncing) return;  // 同步中不触发自动上传
 
   if (syncTimer) clearTimeout(syncTimer);
 
