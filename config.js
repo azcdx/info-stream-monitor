@@ -187,7 +187,7 @@ async function saveConfig() {
     
     // 如果启用同步，上传到云端
     if (syncEnabled) {
-      chrome.runtime.sendMessage({ action: 'syncUpload', favorites: [], records: [] });
+      chrome.runtime.sendMessage({ action: 'syncUpload' });
     }
 
   } catch (error) {
