@@ -997,16 +997,18 @@ function calculateHnScore(story) {
   if (pts > 500) score += 1;
   if (pts > 1000) score += 1;
 
-  // 2. 评论数
+  // 2. 评论数（优化阈值）
   const comments = story.descendants || 0;
+  if (comments > 10) score += 2;
+  if (comments > 30) score += 1;
   if (comments > 50) score += 1;
   if (comments > 100) score += 1;
   if (comments > 200) score += 1;
 
-  // 3. 时效性
+  // 3. 时效性（提高权重）
   const hoursOld = (Date.now() / 1000 - story.time) / 3600;
-  if (hoursOld < 6) score += 1;
-  else if (hoursOld < 12) score += 0.5;
+  if (hoursOld < 6) score += 2;
+  else if (hoursOld < 12) score += 1;
 
   return Math.min(10, Math.round(score));
 }
