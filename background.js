@@ -82,18 +82,11 @@ async function initializeProcessedIds() {
   console.log('[初始化] 加载已处理的ID...');
   processedIds = await loadProcessedIds(STORAGE_KEYS.PROCESSED_IDS);
   redditProcessedIds = await loadProcessedIds(STORAGE_KEYS.REDDIT_PROCESSED_IDS);
-  
+  await loadHnProcessedIds();  // 加载 HN 的已处理 ID
+
   // 启动时清理24小时前的数据
   const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-  
-  let jin10Cleaned = 0;
-  for (const [id, time] of processedIds.entries()) {
-    if (time < oneDayAgo) {
-      processedIds.delete(id);
-      jin10Cleaned++;
-    }
-  }
-  
+
   let redditCleaned = 0;
   for (const [id, time] of redditProcessedIds.entries()) {
     if (time < oneDayAgo) {
@@ -101,24 +94,30 @@ async function initializeProcessedIds() {
       redditCleaned++;
     }
   }
-  
+
+  // 清理 HN 的旧数据
+  let hnCleaned = 0;
+  for (const [id, time] of hnProcessedIds.entries()) {
+    if (time < oneDayAgo) {
+      hnProcessedIds.delete(id);
+      hnCleaned++;
+    }
+  }
+
   // 保存清理后的数据
-  await saveProcessedIds(STORAGE_KEYS.PROCESSED_IDS, processedIds);
   await saveProcessedIds(STORAGE_KEYS.REDDIT_PROCESSED_IDS, redditProcessedIds);
-  
-  console.log('[初始化] 已加载', processedIds.size, '个金十ID（清理了', jin10Cleaned, '个旧数据）');
-  console.log('[初始化] 已加载', redditProcessedIds.size, '个Reddit ID（清理了', redditCleaned, '个旧数据）');
+  await saveHnProcessedIds();
+
+  console.log('[初始化] 已加载', redditProcessedIds.size, '个 Reddit ID（清理了', redditCleaned, '个旧数据）');
+  console.log('[初始化] 已加载', hnProcessedIds.size, '个 HN ID（清理了', hnCleaned, '个旧数据）');
 }
 
 // 默认配置
 const defaultConfig = {
   sources: {
-    jin10: true,
-    twitter: false,
-    reddit: true  // 默认开启 Reddit 监控
-  },
-  jin10: {
-    categories: ['加密货币', '宏观', '科技']
+    twitter: false,      // Twitter（待开发）
+    reddit: true,        // Reddit 监控
+    hackernews: true     // Hacker News 监控
   },
   twitter: {
     users: [],
@@ -126,6 +125,10 @@ const defaultConfig = {
   },
   reddit: {
     subreddits: ['r/ethereum', 'r/cryptocurrency', 'r/defi']
+  },
+  hackernews: {
+    topics: ['top', 'best'],  // top: 热门, best: 精华
+    minScore: 100             // 最低分数阈值
   },
   thresholds: {
     notificationScore: 7,
@@ -150,7 +153,7 @@ chrome.action.onClicked.addListener(async (tab) => {
 
 // ============ Alarms 监听（替代 setInterval）============
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (!isRunning) {
+  if (!isRunning && !isStarting) {
     console.log('[Alarm] 监控未运行，跳过');
     return;
   }
@@ -162,14 +165,14 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   const config = result.config || defaultConfig;
 
   switch (alarm.name) {
-    case 'jin10':
-      if (config.sources.jin10) {
-        fetchJin10Data(config);
-      }
-      break;
     case 'reddit':
       if (config.sources.reddit) {
         fetchRedditData(config);
+      }
+      break;
+    case 'hackernews':
+      if (config.sources.hackernews) {
+        fetchHackerNewsData(config);
       }
       break;
     case 'twitter':
@@ -287,6 +290,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         .catch(error => sendResponse({ success: false, error: error.message }));
       return true;
 
+    case 'syncUpload':
+      syncUpload(request)
+        .then(result => sendResponse({ success: true, message: result.message }))
+        .catch(error => sendResponse({ success: false, error: error.message }));
+      return true;
+
     default:
       sendResponse({ success: false, error: '未知操作' });
   }
@@ -324,7 +333,7 @@ async function startMonitoring(sources) {
     }
 
     // 检查是否至少有一个源
-    if (!config.sources.jin10 && !config.sources.twitter && !config.sources.reddit) {
+    if (!config.sources.jin10 && !config.sources.twitter && !config.sources.reddit && !config.sources.hackernews) {
       throw new Error('请至少选择一个监控源');
     }
 
@@ -336,15 +345,15 @@ async function startMonitoring(sources) {
     // 先立即抓取一次数据（获取停止期间的新帖子）
     console.log('[监控] 立即抓取一次，获取停止期间的新数据...');
     try {
-      if (config.sources.jin10) {
-        console.log('[监控] 抓取金十数据...');
-        await fetchJin10Data(config);
-        console.log('[监控] 金十数据抓取完成');
-      }
       if (config.sources.reddit) {
         console.log('[监控] 抓取 Reddit 数据...');
         await fetchRedditData(config);
         console.log('[监控] Reddit 数据抓取完成');
+      }
+      if (config.sources.hackernews) {
+        console.log('[监控] 抓取 Hacker News 数据...');
+        await fetchHackerNewsData(config);
+        console.log('[监控] Hacker News 数据抓取完成');
       }
     } catch (error) {
       console.error('[监控] 立即抓取失败，继续启动:', error);
@@ -363,11 +372,6 @@ async function startMonitoring(sources) {
     console.log('[监控] 记录开始时间:', new Date(lastMonitorTime).toLocaleString());
 
     // 启动各个源的定时监控
-    if (config.sources.jin10) {
-      console.log('[监控] 启动金十定时监控');
-      startJin10Monitoring(config);
-    }
-
     if (config.sources.twitter) {
       console.log('[监控] 启动 Twitter 监控');
       startTwitterMonitoring(config);
@@ -376,6 +380,12 @@ async function startMonitoring(sources) {
     if (config.sources.reddit) {
       console.log('[监控] 启动 Reddit 定时监控');
       startRedditMonitoring(config);
+    }
+
+    if (config.sources.hackernews) {
+      console.log('[监控] 启动 Hacker News 定时监控');
+      loadHnProcessedIds();
+      startHackerNewsMonitoring(config);
     }
 
     isStarting = false;
@@ -413,8 +423,8 @@ async function stopMonitoring() {
 
 function clearAllFetchIntervals() {
   // 清除所有 alarms
-  chrome.alarms.clear('jin10');
   chrome.alarms.clear('reddit');
+  chrome.alarms.clear('hackernews');
   chrome.alarms.clear('twitter');
 }
 
@@ -434,117 +444,6 @@ async function updateConfig(sources) {
   }
 
   return true;
-}
-
-// ============ 金十数据监控 ============
-function startJin10Monitoring(config) {
-  console.log('[金十] 启动监控（使用 alarms）');
-
-  // 立即执行一次
-  fetchJin10Data(config);
-
-  // 每1分钟执行一次（chrome.alarms 最小间隔为1分钟）
-  chrome.alarms.create('jin10', { periodInMinutes: 1 });
-}
-
-async function fetchJin10Data(config) {
-  // 检查是否还在运行
-  if (!isRunning && !isStarting) {
-    console.log('[金十] 监控已停止，跳过抓取');
-    return;
-  }
-
-  try {
-    console.log('[金十] 获取数据...');
-
-    // 获取金十快讯数据
-    const response = await fetch('https://www.jin10.com/static/timeline.json');
-    if (!response.ok) {
-      console.log('[金十] 获取失败:', response.status);
-      return;
-    }
-
-    const data = await response.json();
-    const items = data?.data?.item || data || [];
-
-    console.log('[金十] 获取到', items.length, '条数据');
-
-    // 处理最新数据（取前10条）
-    for (const item of items.slice(0, 10)) {
-      // 检查是否还在运行
-      if (!isRunning && !isStarting) {
-        console.log('[金十] 监控已停止，中断处理');
-        break;
-      }
-
-      const id = 'jin10_' + (item.id || item._id || Date.now() + Math.random());
-      const itemTime = item.time || item.created_at || Date.now();
-
-      // 跳过监控开始时间之前的旧数据
-      const fiveMinutesAgo = lastMonitorTime - 300000;
-
-      if (lastMonitorTime > 0 && itemTime < fiveMinutesAgo) {
-        console.log('[金十] 跳过旧数据:', (item.title || item.content || '').substring(0, 30));
-        continue;
-      }
-
-      // 检查是否已处理过
-      const isNew = await addProcessedId(STORAGE_KEYS.PROCESSED_IDS, id);
-      if (!isNew) {
-        continue;
-      }
-
-      // 构建数据项
-      const dataItem = {
-        id: id,
-        title: item.title || item.content || item.data?.content || '',
-        content: item.content || item.data?.content || '',
-        type: classifyJin10Post(item),
-        score: calculateJin10Score(item),
-        time: itemTime,
-        source: 'jin10',
-        url: item.url || item.link || `https://www.jin10.com/detail/${item.id}`,
-        value: item.content || item.data?.content || ''
-      };
-
-      console.log('[金十] 新数据:', dataItem.title.substring(0, 30));
-
-      // 分析和处理
-      await analyzeAndProcess(dataItem);
-    }
-
-  } catch (error) {
-    console.error('[金十] 获取数据失败:', error);
-  }
-}
-
-// 分类金十帖子
-function classifyJin10Post(item) {
-  const text = (item.title + ' ' + (item.content || '')).toLowerCase();
-
-  if (text.includes('降息') || text.includes('加息') || text.includes('利率') || text.includes('fed') || text.includes('美联储')) {
-    return '📈';
-  } else if (text.includes('etf') || text.includes('基金') || text.includes('上市')) {
-    return '🎯';
-  } else if (text.includes('突发') || text.includes('快讯') || text.includes('重要')) {
-    return '💡';
-  }
-
-  return '💡';
-}
-
-// 计算金十帖子评分
-function calculateJin10Score(item) {
-  let score = 5;
-
-  const text = (item.title + ' ' + (item.content || '')).toLowerCase();
-
-  // 重要关键词加分
-  if (text.includes('突发') || text.includes('重要')) score += 2;
-  if (text.includes('美联储') || text.includes('fed')) score += 1;
-  if (text.includes('etf') || text.includes('比特币')) score += 1;
-
-  return Math.min(10, score);
 }
 
 
@@ -923,10 +822,237 @@ function extractRedditValue(post, translatedContent) {
   return '来自 ' + (post.subreddit_name || post.subreddit) + ' 的帖子，' + post.num_comments + ' 条评论。';
 }
 
+// ============ Hacker News 监控 ============
+let hnProcessedIds = new Map();
+const HN_PROCESSED_IDS_KEY = 'hnProcessedIds_v1';
+
+async function loadHnProcessedIds() {
+  try {
+    const result = await chrome.storage.local.get([HN_PROCESSED_IDS_KEY]);
+    const data = result[HN_PROCESSED_IDS_KEY] || {};
+    hnProcessedIds = new Map(Object.entries(data));
+    console.log('[HN] 已加载', hnProcessedIds.size, '个已处理ID');
+  } catch (error) {
+    console.error('[HN] 加载ID失败:', error);
+    hnProcessedIds = new Map();
+  }
+}
+
+async function saveHnProcessedIds() {
+  try {
+    const data = Object.fromEntries(hnProcessedIds);
+    await chrome.storage.local.set({ [HN_PROCESSED_IDS_KEY]: data });
+  } catch (error) {
+    console.error('[HN] 保存ID失败:', error);
+  }
+}
+
+async function addHnProcessedId(id) {
+  if (hnProcessedIds.has(id)) return false;
+
+  hnProcessedIds.set(id, Date.now());
+
+  // 清理24小时前的旧数据
+  const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+  for (const [savedId, time] of hnProcessedIds.entries()) {
+    if (time < oneDayAgo) {
+      hnProcessedIds.delete(savedId);
+    }
+  }
+
+  // 限制最大数量
+  if (hnProcessedIds.size > 1000) {
+    const sortedIds = Array.from(hnProcessedIds.entries()).sort((a, b) => b[1] - a[1]);
+    const toRemove = sortedIds.slice(500);
+    toRemove.forEach(([savedId]) => hnProcessedIds.delete(savedId));
+  }
+
+  saveHnProcessedIds();
+  return true;
+}
+
+function startHackerNewsMonitoring(config) {
+  console.log('[HN] 启动监控');
+  fetchHackerNewsData(config);
+  chrome.alarms.create('hackernews', { periodInMinutes: 5 }); // HN 5分钟检查一次
+  console.log('[HN] 监控已启动，每5分钟检查一次');
+}
+
+async function fetchHackerNewsData(config) {
+  if (!isRunning && !isStarting) {
+    console.log('[HN] 监控已停止，跳过抓取');
+    return;
+  }
+
+  try {
+    console.log('[HN] 获取数据...');
+
+    const topics = config.hackernews?.topics || ['top'];
+    const minScore = config.hackernews?.minScore || 100;
+    const shouldTranslate = config.translate !== false;
+
+    for (const topic of topics) {
+      if (!isRunning && !isStarting) break;
+
+      // 获取故事ID列表
+      const listUrl = `https://hacker-news.firebaseio.com/v0/${topic}stories.json`;
+      console.log('[HN] 获取列表:', listUrl);
+
+      const listResponse = await fetch(listUrl);
+      if (!listResponse.ok) {
+        console.log('[HN] 获取列表失败:', listResponse.status);
+        continue;
+      }
+
+      const storyIds = await listResponse.json();
+      console.log('[HN] 获取到', storyIds.length, '个故事ID');
+
+      // 只处理前30个
+      const topIds = storyIds.slice(0, 30);
+
+      for (const storyId of topIds) {
+        if (!isRunning && !isStarting) break;
+
+        const itemId = 'hn_' + storyId;
+
+        // 检查是否已处理
+        const isNew = await addHnProcessedId(itemId);
+        if (!isNew) {
+          continue;
+        }
+
+        // 获取故事详情
+        const storyUrl = `https://hacker-news.firebaseio.com/v0/item/${storyId}.json`;
+        const storyResponse = await fetch(storyUrl);
+
+        if (!storyResponse.ok) continue;
+
+        const story = await storyResponse.json();
+        if (!story || !story.title) continue;
+
+        // 检查分数阈值
+        const storyScore = story.score || 0;
+        if (storyScore < minScore) {
+          continue;
+        }
+
+        // 计算评分
+        const rawScore = calculateHnScore(story);
+
+        // 获取面板阈值
+        const configResult = await chrome.storage.local.get(['config']);
+        const panelThreshold = configResult.config?.thresholds?.panelScore || 5;
+
+        // 翻译
+        let translatedTitle = story.title;
+        if (rawScore >= panelThreshold && shouldTranslate) {
+          translatedTitle = await translateText(story.title);
+        }
+
+        const item = {
+          id: itemId,
+          title: translatedTitle,
+          content: story.text || story.url || '',
+          type: classifyHnPost(story),
+          score: rawScore,
+          time: story.time * 1000,
+          source: 'hackernews',
+          url: story.url || `https://news.ycombinator.com/item?id=${storyId}`,
+          hnScore: storyScore,
+          descendants: story.descendants || 0,
+          by: story.by,
+          topic: topic,
+          value: `HN ${topic} - ${storyScore} pts, ${story.descendants || 0} comments`
+        };
+
+        console.log('[HN] 新故事:', item.title.substring(0, 40), '评分:', rawScore);
+
+        await analyzeAndProcess(item);
+
+        // 请求间隔
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+
+      // topic 间隔
+      if (topics.indexOf(topic) < topics.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+
+    console.log('[HN] 本轮检查完成 -', new Date().toLocaleTimeString());
+
+  } catch (error) {
+    console.error('[HN] 获取失败:', error);
+  }
+}
+
+// 计算 HN 评分
+function calculateHnScore(story) {
+  let score = 5;
+
+  // 1. 分数（HN points）
+  const pts = story.score || 0;
+  if (pts > 100) score += 1;
+  if (pts > 300) score += 1;
+  if (pts > 500) score += 1;
+  if (pts > 1000) score += 1;
+
+  // 2. 评论数
+  const comments = story.descendants || 0;
+  if (comments > 50) score += 1;
+  if (comments > 100) score += 1;
+  if (comments > 200) score += 1;
+
+  // 3. 时效性
+  const hoursOld = (Date.now() / 1000 - story.time) / 3600;
+  if (hoursOld < 6) score += 1;
+  else if (hoursOld < 12) score += 0.5;
+
+  return Math.min(10, Math.round(score));
+}
+
+// 分类 HN 帖子
+function classifyHnPost(story) {
+  const title = (story.title || '').toLowerCase();
+  const url = (story.url || '').toLowerCase();
+
+  // AI/ML
+  if (title.includes('ai') || title.includes('machine learning') ||
+      title.includes('gpt') || title.includes('llm') || title.includes('neural')) {
+    return '🤖';
+  }
+
+  // 创业/产品
+  if (title.includes('startup') || title.includes('launch') ||
+      title.includes('product') || title.includes('yc')) {
+    return '🚀';
+  }
+
+  // 技术/编程
+  if (title.includes('programming') || title.includes('code') ||
+      title.includes('language') || title.includes('framework')) {
+    return '💻';
+  }
+
+  // 加密/Web3
+  if (title.includes('crypto') || title.includes('bitcoin') ||
+      title.includes('ethereum') || title.includes('blockchain')) {
+    return '₿';
+  }
+
+  // 科学/研究
+  if (title.includes('science') || title.includes('research') ||
+      title.includes('study') || title.includes('paper')) {
+    return '🔬';
+  }
+
+  return '💡';
+}
+
 // ============ AI 分析和处理 ============
 async function analyzeAndProcess(item) {
-    // 检查是否仍在运行
-    if (!isRunning) {
+    // 检查是否仍在运行或启动中
+    if (!isRunning && !isStarting) {
       console.log('[处理] 监控已停止，跳过处理');
       return;
     }
@@ -1018,25 +1144,33 @@ function startPeriodicCleanup() {
 
 async function cleanOldData() {
   try {
-    console.log('[清理] 开始清理超过24小时的数据...');
+    console.log('[清理] 开始清理数据...');
 
     const result = await chrome.storage.local.get(['recentNotifications']);
     let recent = result.recentNotifications || [];
 
-    // 删除超过24小时的数据
-    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
     const beforeCount = recent.length;
 
+    // 1. 删除超过24小时的数据
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
     recent = recent.filter(item => {
       return item.timestamp && item.timestamp > oneDayAgo;
     });
 
-    const afterCount = recent.length;
-    const cleanedCount = beforeCount - afterCount;
+    let timeCleaned = beforeCount - recent.length;
 
-    if (cleanedCount > 0) {
+    // 2. 如果超过3000条，只保留最新3000条（删除最旧的）
+    let sizeCleaned = 0;
+    if (recent.length > 3000) {
+      sizeCleaned = recent.length - 3000;
+      recent = recent.slice(0, 3000);
+    }
+
+    const totalCleaned = timeCleaned + sizeCleaned;
+
+    if (totalCleaned > 0) {
       await chrome.storage.local.set({ recentNotifications: recent });
-      console.log(`[清理] 删除了 ${cleanedCount} 条超过24小时的数据`);
+      console.log(`[清理] 删除了 ${totalCleaned} 条数据（超时: ${timeCleaned}, 超量: ${sizeCleaned}），剩余: ${recent.length}`);
     } else {
       console.log('[清理] 没有需要清理的数据');
     }
@@ -1062,8 +1196,10 @@ async function addRecentNotification(item) {
   // 添加到开头
   recent.unshift(item);
 
-  // 每天最多显示 3000 条数据
-  recent = recent.slice(0, 3000);
+  // 如果超过3000条，删除最后1000条（最早的）
+  if (recent.length > 3000) {
+    recent = recent.slice(0, 3000);
+  }
 
   await chrome.storage.local.set({ recentNotifications: recent });
   console.log('[存储] 已添加到通知列表，当前数量:', recent.length);
@@ -1280,21 +1416,39 @@ async function syncMerge() {
     console.log('[同步] 拉取云端数据...');
     const config = await supabaseClient.get('config') || {};
     const favorites = await supabaseClient.get('favorites') || [];
-    const records = await supabaseClient.get('records') || [];
+    let records = await supabaseClient.get('records') || [];
     const stats = await supabaseClient.get('stats') || { total: 0, valuable: 0, favorite: 0 };
+
+    // 同步去重 ID
+    const redditIds = await supabaseClient.get('redditIds') || {};
+    const hnIds = await supabaseClient.get('hnIds') || {};
+
+    // 限制最多3000条
+    if (records.length > 3000) {
+      console.log('[同步] 记录数超限(' + records.length + ')，只保留最新3000条');
+      records = records.slice(0, 3000);
+    }
 
     await chrome.storage.local.set({
       config: config,
       favorites: favorites,
       recentNotifications: records,
-      stats: stats
+      stats: stats,
+      redditProcessedIds_v3: redditIds,
+      hnProcessedIds_v1: hnIds
     });
+
+    // 更新内存中的去重 ID
+    redditProcessedIds = new Map(Object.entries(redditIds));
+    hnProcessedIds = new Map(Object.entries(hnIds));
 
     console.log('[同步] 同步完成', {
       config: Object.keys(config).length + ' 项',
       favorites: favorites.length + ' 条',
       records: records.length + ' 条',
-      stats: stats
+      stats: stats,
+      redditIds: Object.keys(redditIds).length + ' 个',
+      hnIds: Object.keys(hnIds).length + ' 个'
     });
 
     return { success: true, message: '同步完成：从云端下载数据' };
@@ -1315,11 +1469,18 @@ async function syncUpload(data) {
   }
 
   try {
-    const localData = await chrome.storage.local.get(['config', 'favorites', 'recentNotifications']);
-    
+    const localData = await chrome.storage.local.get([
+      'config', 'favorites', 'recentNotifications',
+      'redditProcessedIds_v3', 'hnProcessedIds_v1'
+    ]);
+
     await supabaseClient.upsert('config', localData.config || {});
     await supabaseClient.upsert('favorites', data.favorites || localData.favorites || []);
     await supabaseClient.upsert('records', (data.records || localData.recentNotifications || []).slice(0, 1000));
+
+    // 上传去重 ID
+    await supabaseClient.upsert('redditIds', localData.redditProcessedIds_v3 || {});
+    await supabaseClient.upsert('hnIds', localData.hnProcessedIds_v1 || {});
 
     console.log('[同步] 上传完成');
     return { success: true, message: '数据已上传到云端' };
@@ -1341,8 +1502,14 @@ async function syncDownload() {
   try {
     const config = await supabaseClient.get('config') || {};
     const favorites = await supabaseClient.get('favorites') || [];
-    const records = await supabaseClient.get('records') || [];
+    let records = await supabaseClient.get('records') || [];
     const stats = await supabaseClient.get('stats') || { total: 0, valuable: 0, favorite: 0 };
+
+    // 限制最多3000条
+    if (records.length > 3000) {
+      console.log('[同步] 记录数超限(' + records.length + ')，只保留最新3000条');
+      records = records.slice(0, 3000);
+    }
 
     await chrome.storage.local.set({ config });
     await chrome.storage.local.set({ favorites });
@@ -1367,13 +1534,17 @@ function scheduleAutoSync() {
 
   syncTimer = setTimeout(async () => {
     try {
-      const localData = await chrome.storage.local.get(['config', 'favorites', 'recentNotifications', 'stats']);
-      
+      const localData = await chrome.storage.local.get(['config', 'favorites', 'recentNotifications', 'stats', 'redditProcessedIds_v3', 'hnProcessedIds_v1']);
+
       await supabaseClient.upsert('config', localData.config || {});
       await supabaseClient.upsert('favorites', localData.favorites || []);
       await supabaseClient.upsert('records', (localData.recentNotifications || []).slice(0, 1000));
       await supabaseClient.upsert('stats', localData.stats || { total: 0, valuable: 0, favorite: 0 });
-      
+
+      // 同步去重 ID
+      await supabaseClient.upsert('redditIds', localData.redditProcessedIds_v3 || {});
+      await supabaseClient.upsert('hnIds', localData.hnProcessedIds_v1 || {});
+
       console.log('[自动同步] 数据已上传到云端');
     } catch (error) {
       console.error('[自动同步] 失败:', error);
@@ -1384,8 +1555,8 @@ function scheduleAutoSync() {
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === 'local') {
     initSupabaseClient();
-    
-    if (syncEnabled && (changes.favorites || changes.recentNotifications || changes.config || changes.stats)) {
+
+    if (syncEnabled && (changes.favorites || changes.recentNotifications || changes.config || changes.stats || changes.redditProcessedIds_v3 || changes.hnProcessedIds_v1)) {
       console.log('[同步] 检测到数据变化，3秒后自动上传到云端');
       scheduleAutoSync();
     }

@@ -7,6 +7,10 @@ const translateApiKeyInput = document.getElementById('translate-api-key');
 const saveBtn = document.getElementById('save-btn');
 const cancelBtn = document.getElementById('cancel-btn');
 
+// HN 配置元素
+const hnTopicsSelect = document.getElementById('hn-topics');
+const hnMinScoreInput = document.getElementById('hn-min-score');
+
 // 同步配置元素
 const syncEnabledSelect = document.getElementById('sync-enabled');
 const syncUserIdInput = document.getElementById('sync-user-id');
@@ -58,6 +62,12 @@ async function loadConfig() {
     if (config.translation) {
       translateProviderSelect.value = config.translation.provider || 'free';
       translateApiKeyInput.value = config.translation.apiKey || '';
+    }
+
+    // HN 配置
+    if (config.hackernews) {
+      hnTopicsSelect.value = (config.hackernews.topics || ['top']).join(',');
+      hnMinScoreInput.value = config.hackernews.minScore || 100;
     }
 
     // 同步配置
@@ -152,6 +162,13 @@ async function saveConfig() {
       subredditsRaw: redditSubredditsInput.value
     };
     config.translation = { provider: translateProvider, apiKey: translateApiKey };
+
+    // HN 配置
+    config.hackernews = {
+      topics: hnTopicsSelect.value.split(',').filter(t => t.trim()),
+      minScore: parseInt(hnMinScoreInput.value) || 100
+    };
+
     config.sync = {
       enabled: syncEnabled,
       userId: syncUserIdInput.value.trim(),

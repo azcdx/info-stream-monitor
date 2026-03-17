@@ -1,16 +1,16 @@
 {
   "manifest_version": 3,
   "name": "信息流监控助手",
-  "version": "2.0.0",
-  "description": "监控金十数据、Reddit，AI 分析价值并推送",
+  "version": "2.2.0",
+  "description": "监控 Reddit、Hacker News，AI 分析价值并推送",
   "permissions": [
     "storage",
     "sidePanel",
     "alarms"
   ],
   "host_permissions": [
-    "https://*.jin10.com/*",
     "https://*.reddit.com/*",
+    "https://hacker-news.firebaseio.com/*",
     "https://*.supabase.co/*",
     "https://cdn.jsdelivr.net/*"
   ],

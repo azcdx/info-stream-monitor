@@ -14,9 +14,9 @@ const unreadCountEl = document.getElementById('unread-count');
 const pulseZoneEl = document.getElementById('pulse-zone');
 
 // 源复选框
-const jin10Checkbox = document.getElementById('jin10');
 const twitterCheckbox = document.getElementById('twitter');
 const redditCheckbox = document.getElementById('reddit');
+const hackernewsCheckbox = document.getElementById('hackernews');
 
 // 折叠状态（默认折叠通知）
 const foldedSections = { sources: true, stats: true, recent: true };
@@ -112,10 +112,10 @@ function applyFoldedState() {
 async function loadConfig() {
   const result = await chrome.storage.local.get(['config']);
   const config = result.config || {};
-  const sources = config.sources || { jin10: true, twitter: false, reddit: false };
-  jin10Checkbox.checked = sources.jin10;
+  const sources = config.sources || { twitter: false, reddit: true, hackernews: true };
   twitterCheckbox.checked = sources.twitter;
   redditCheckbox.checked = sources.reddit;
+  hackernewsCheckbox.checked = sources.hackernews;
 }
 
 // 更新状态
@@ -205,6 +205,10 @@ function renderRecentItems() {
     const commentCount = item.num_comments || 0;
     const sourceLabel = getSourceLabel(item.source);
 
+    // 来源图标
+    const sourceIcon = item.source === 'reddit' ? '<span class="source-icon reddit">R</span>' :
+                       item.source === 'hackernews' ? '<span class="source-icon hn">H</span>' : '';
+
     const metaParts = [scoreDisplay, sourceLabel];
     if (subredditText) metaParts.push(subredditText);
     if (timeAgo) metaParts.push(timeAgo);
@@ -214,7 +218,7 @@ function renderRecentItems() {
       <div class="recent-item" data-id="${item.id}" data-needs-translate="${needsTranslate ? 'true' : 'false'}">
         <div class="recent-title-row">
           <div class="recent-title">
-            ${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank">${titleEscaped}</a>` : titleEscaped}
+            ${sourceIcon}${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank">${titleEscaped}</a>` : titleEscaped}
           </div>
           <button class="fav-btn" data-id="${item.id}" title="收藏">收藏</button>
         </div>
@@ -327,9 +331,9 @@ function bindEvents() {
   stopBtn.addEventListener('click', stopMonitoring);
   configBtn.addEventListener('click', () => chrome.tabs.create({ url: 'config.html' }));
   favoritesBtn.addEventListener('click', () => chrome.tabs.create({ url: 'favorites.html' }));
-  jin10Checkbox.addEventListener('change', saveConfig);
   twitterCheckbox.addEventListener('change', saveConfig);
   redditCheckbox.addEventListener('change', saveConfig);
+  hackernewsCheckbox.addEventListener('change', saveConfig);
   document.getElementById('sources-toggle').addEventListener('click', () => toggleSection('sources'));
   document.getElementById('stats-toggle').addEventListener('click', () => toggleSection('stats'));
   document.getElementById('recent-toggle').addEventListener('click', () => toggleSection('recent'));
@@ -347,9 +351,9 @@ function toggleSection(section) {
 // 保存配置
 async function saveConfig() {
   const sources = {
-    jin10: jin10Checkbox.checked,
     twitter: twitterCheckbox.checked,
-    reddit: redditCheckbox.checked
+    reddit: redditCheckbox.checked,
+    hackernews: hackernewsCheckbox.checked
   };
   const result = await chrome.storage.local.get(['config']);
   const config = result.config || {};
@@ -361,16 +365,16 @@ async function saveConfig() {
 // 获取当前选择的源
 function getSelectedSources() {
   return {
-    jin10: jin10Checkbox.checked,
     twitter: twitterCheckbox.checked,
-    reddit: redditCheckbox.checked
+    reddit: redditCheckbox.checked,
+    hackernews: hackernewsCheckbox.checked
   };
 }
 
 // 开始监控
 function startMonitoring() {
   const sources = getSelectedSources();
-  if (!sources.jin10 && !sources.twitter && !sources.reddit) {
+  if (!sources.twitter && !sources.reddit && !sources.hackernews) {
     alert('请至少选择一个监控源');
     return;
   }
@@ -392,7 +396,7 @@ function stopMonitoring() {
 
 // 获取来源标签
 function getSourceLabel(source) {
-  const labels = { jin10: '金十', twitter: '推特', reddit: '红迪' };
+  const labels = { twitter: '推特', reddit: '红迪', hackernews: 'HN' };
   return labels[source] || source;
 }
 

@@ -229,6 +229,29 @@
       text-decoration: underline;
     }
 
+    .source-icon {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      line-height: 16px;
+      text-align: center;
+      font-size: 10px;
+      font-weight: bold;
+      border-radius: 3px;
+      margin-right: 6px;
+      flex-shrink: 0;
+    }
+
+    .source-icon.reddit {
+      background: #FF4500;
+      color: white;
+    }
+
+    .source-icon.hn {
+      background: #FF6600;
+      color: white;
+    }
+
     .fav-btn {
       padding: 1px 6px;
       margin-left: 8px;
@@ -381,16 +404,16 @@
       </div>
       <div class="card-body expanded" id="sources-body">
         <div class="source-item">
-          <input type="checkbox" class="source-checkbox" id="jin10" checked>
-          <label class="source-label" for="jin10">金十数据</label>
-        </div>
-        <div class="source-item">
           <input type="checkbox" class="source-checkbox" id="twitter">
           <label class="source-label" for="twitter">推特</label>
         </div>
         <div class="source-item">
-          <input type="checkbox" class="source-checkbox" id="reddit">
+          <input type="checkbox" class="source-checkbox" id="reddit" checked>
           <label class="source-label" for="reddit">红迪</label>
+        </div>
+        <div class="source-item">
+          <input type="checkbox" class="source-checkbox" id="hackernews" checked>
+          <label class="source-label" for="hackernews">HN</label>
         </div>
         <div class="buttons">
           <button class="btn btn-primary" id="start-btn">开始</button>

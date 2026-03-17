@@ -296,6 +296,27 @@
       </div>
     </div>
 
+    <!-- Hacker News 配置 -->
+    <div class="card">
+      <div class="card-title">Hacker News 配置</div>
+
+      <div class="form-row">
+        <div class="form-col">
+          <label class="form-label">话题类型</label>
+          <select class="form-select" id="hn-topics">
+            <option value="top">热门 (Top Stories)</option>
+            <option value="best">精华 (Best Stories)</option>
+            <option value="top,best">热门 + 精华</option>
+          </select>
+        </div>
+        <div class="form-col">
+          <label class="form-label">最低分数</label>
+          <input type="number" class="form-input" id="hn-min-score" value="100" min="0" max="10000">
+          <div class="hint">低于此分数的帖子将被过滤</div>
+        </div>
+      </div>
+    </div>
+
     <!-- 数据导入/导出 -->
     <div class="card">
       <div class="card-title">数据备份 & 同步</div>

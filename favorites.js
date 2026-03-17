@@ -186,9 +186,9 @@ function bindCardEvents() {
 // 获取来源标签
 function getSourceLabel(source) {
   const labels = {
-    jin10: '金十数据',
     twitter: 'X/Twitter',
-    reddit: 'Reddit'
+    reddit: 'Reddit',
+    hackernews: 'Hacker News'
   };
   return labels[source] || source;
 }
