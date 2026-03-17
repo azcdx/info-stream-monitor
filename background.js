@@ -1159,11 +1159,11 @@ async function cleanOldData() {
 
     let timeCleaned = beforeCount - recent.length;
 
-    // 2. 如果超过3000条，只保留最新3000条（删除最旧的）
+    // 2. 如果超过3000条，删除最旧的1000条
     let sizeCleaned = 0;
     if (recent.length > 3000) {
-      sizeCleaned = recent.length - 3000;
-      recent = recent.slice(0, 3000);
+      sizeCleaned = 1000;
+      recent = recent.slice(0, recent.length - 1000);
     }
 
     const totalCleaned = timeCleaned + sizeCleaned;
@@ -1196,9 +1196,9 @@ async function addRecentNotification(item) {
   // 添加到开头
   recent.unshift(item);
 
-  // 如果超过3000条，删除最后1000条（最早的）
+  // 如果超过3000条，删除最旧的1000条
   if (recent.length > 3000) {
-    recent = recent.slice(0, 3000);
+    recent = recent.slice(0, recent.length - 1000);
   }
 
   await chrome.storage.local.set({ recentNotifications: recent });
@@ -1423,10 +1423,10 @@ async function syncMerge() {
     const redditIds = await supabaseClient.get('redditIds') || {};
     const hnIds = await supabaseClient.get('hnIds') || {};
 
-    // 限制最多3000条
+    // 如果超过3000条，删除最旧的1000条
     if (records.length > 3000) {
-      console.log('[同步] 记录数超限(' + records.length + ')，只保留最新3000条');
-      records = records.slice(0, 3000);
+      console.log('[同步] 记录数超限(' + records.length + ')，删除最旧的1000条');
+      records = records.slice(0, records.length - 1000);
     }
 
     await chrome.storage.local.set({
@@ -1476,7 +1476,7 @@ async function syncUpload(data) {
 
     await supabaseClient.upsert('config', localData.config || {});
     await supabaseClient.upsert('favorites', data.favorites || localData.favorites || []);
-    await supabaseClient.upsert('records', (data.records || localData.recentNotifications || []).slice(0, 1000));
+    await supabaseClient.upsert('records', data.records || localData.recentNotifications || []);
 
     // 上传去重 ID
     await supabaseClient.upsert('redditIds', localData.redditProcessedIds_v3 || {});
@@ -1505,10 +1505,10 @@ async function syncDownload() {
     let records = await supabaseClient.get('records') || [];
     const stats = await supabaseClient.get('stats') || { total: 0, valuable: 0, favorite: 0 };
 
-    // 限制最多3000条
+    // 如果超过3000条，删除最旧的1000条
     if (records.length > 3000) {
-      console.log('[同步] 记录数超限(' + records.length + ')，只保留最新3000条');
-      records = records.slice(0, 3000);
+      console.log('[同步] 记录数超限(' + records.length + ')，删除最旧的1000条');
+      records = records.slice(0, records.length - 1000);
     }
 
     await chrome.storage.local.set({ config });
@@ -1538,7 +1538,7 @@ function scheduleAutoSync() {
 
       await supabaseClient.upsert('config', localData.config || {});
       await supabaseClient.upsert('favorites', localData.favorites || []);
-      await supabaseClient.upsert('records', (localData.recentNotifications || []).slice(0, 1000));
+      await supabaseClient.upsert('records', localData.recentNotifications || []);
       await supabaseClient.upsert('stats', localData.stats || { total: 0, valuable: 0, favorite: 0 });
 
       // 同步去重 ID
@@ -1563,25 +1563,25 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
 });
 
-// 启动时从云端同步
-chrome.runtime.onStartup.addListener(async () => {
-  console.log('[同步] 浏览器启动，从云端同步数据');
-  try {
-    await syncMerge();
-  } catch (error) {
-    console.error('[启动同步] 失败:', error);
-  }
-});
+// 启动时从云端同步（已禁用，避免覆盖本地数据）
+// chrome.runtime.onStartup.addListener(async () => {
+//   console.log('[同步] 浏览器启动，从云端同步数据');
+//   try {
+//     await syncMerge();
+//   } catch (error) {
+//     console.error('[启动同步] 失败:', error);
+//   }
+// });
 
-// 初始化时从云端同步一次
-setTimeout(async () => {
-  console.log('[同步] 初始化，从云端同步数据');
-  try {
-    await syncMerge();
-  } catch (error) {
-    console.error('[初始化同步] 失败:', error);
-  }
-}, 5000);
+// 初始化时从云端同步一次（已禁用，避免覆盖本地数据）
+// setTimeout(async () => {
+//   console.log('[同步] 初始化，从云端同步数据');
+//   try {
+//     await syncMerge();
+//   } catch (error) {
+//     console.error('[初始化同步] 失败:', error);
+//   }
+// }, 5000);
 
 // 初始化
 initSupabaseClient();
